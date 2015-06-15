@@ -1,0 +1,48 @@
+\select@language {italian}
+\contentsline {chapter}{\numberline {1}Introduzione}{4}
+\contentsline {section}{\numberline {1.1}Obiettivo}{4}
+\contentsline {section}{\numberline {1.2}Struttura dell'elaborato}{4}
+\contentsline {section}{\numberline {1.3}Come Leggere l'elaborato}{4}
+\contentsline {chapter}{\numberline {2}File System}{6}
+\contentsline {section}{\numberline {2.1}Introduzione concetto file System }{6}
+\contentsline {section}{\numberline {2.2}Struttura generale}{6}
+\contentsline {section}{\numberline {2.3}Strutture Dati}{8}
+\contentsline {section}{\numberline {2.4}Metodi di allocazione}{9}
+\contentsline {section}{\numberline {2.5}Metodi di gestione dello spazio libero}{11}
+\contentsline {section}{\numberline {2.6}Conclusioni}{12}
+\contentsline {chapter}{\numberline {3}FAT 32}{13}
+\contentsline {section}{\numberline {3.1}Carateritiche}{13}
+\contentsline {section}{\numberline {3.2}Struttura}{14}
+\contentsline {subsection}{\numberline {3.2.1}Regione Riservata}{14}
+\contentsline {subsection}{\numberline {3.2.2}Regione Fat}{16}
+\contentsline {subsection}{\numberline {3.2.3}Regione Dati}{16}
+\contentsline {section}{\numberline {3.3}Getione Fat}{16}
+\contentsline {section}{\numberline {3.4}Gestione Directory}{18}
+\contentsline {section}{\numberline {3.5}Differenze Specifiche}{19}
+\contentsline {section}{\numberline {3.6}Conclusione}{20}
+\contentsline {chapter}{\numberline {4}Analisi e specifica dei requisiti}{22}
+\contentsline {section}{\numberline {4.1}Analisi Dominio}{22}
+\contentsline {section}{\numberline {4.2}Requisiti utente}{23}
+\contentsline {section}{\numberline {4.3}Requisiti software}{23}
+\contentsline {section}{\numberline {4.4}Conclusioni}{26}
+\contentsline {chapter}{\numberline {5} Modifiche Introdotte sul nucleo}{27}
+\contentsline {section}{\numberline {5.1}Modifiche modulo Sistema}{27}
+\contentsline {subsection}{\numberline {5.1.1}Hard Disk}{27}
+\contentsline {subsection}{\numberline {5.1.2}Area privata processo}{28}
+\contentsline {section}{\numberline {5.2}Modifiche modulo IO}{30}
+\contentsline {subsection}{\numberline {5.2.1}Data e ora}{30}
+\contentsline {subsection}{\numberline {5.2.2}Librerie}{31}
+\contentsline {subsection}{\numberline {5.2.3}Gestione errori}{31}
+\contentsline {section}{\numberline {5.3}Conclusioni}{32}
+\contentsline {chapter}{\numberline {6}Struttura del progetto}{33}
+\contentsline {section}{\numberline {6.1}Struttura Modulare}{33}
+\contentsline {section}{\numberline {6.2}Modulo Base}{34}
+\contentsline {subsection}{\numberline {6.2.1}Volume}{35}
+\contentsline {section}{\numberline {6.3}Fat}{35}
+\contentsline {subsection}{\numberline {6.3.1}DATA}{36}
+\contentsline {section}{\numberline {6.4}Modulo Gestore dei File}{38}
+\contentsline {subsection}{\numberline {6.4.1}Direntry}{38}
+\contentsline {subsection}{\numberline {6.4.2}FCB}{39}
+\contentsline {section}{\numberline {6.5}System Call}{40}
+\contentsline {section}{\numberline {6.6}Processo di Inizializzazione}{43}
+\contentsline {section}{\numberline {6.7}Conclusioni}{43}

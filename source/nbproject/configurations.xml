@@ -1,0 +1,482 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configurationDescriptor version="69">
+  <logicalFolder name="root" displayName="root" projectFiles="true">
+    <df name="Nucleo" root=".">
+      <df name="boot" kind="SOURCE_LOGICAL_FOLDER">
+        <df name="boot" kind="SOURCE_LOGICAL_FOLDER">
+          <df name="grub" kind="SOURCE_LOGICAL_FOLDER">
+          </df>
+        </df>
+      </df>
+      <df name="fs" kind="SOURCE_LOGICAL_FOLDER">
+        <df name="backup" kind="SOURCE_LOGICAL_FOLDER">
+          <in>data.c</in>
+          <in>data.h</in>
+          <in>direntry.c</in>
+          <in>direntry.h</in>
+          <in>errno.h</in>
+          <in>fat.c</in>
+          <in>fat.h</in>
+          <in>filesystem.c</in>
+          <in>fs.h</in>
+          <in>mbr.h</in>
+          <in>sistema.h</in>
+          <in>string.h</in>
+          <in>type.h</in>
+          <in>volumi.c</in>
+          <in>volumi.h</in>
+        </df>
+        <in>data.c</in>
+        <in>data.h</in>
+        <in>direntry.c</in>
+        <in>direntry.h</in>
+        <in>fat.c</in>
+        <in>fat.h</in>
+        <in>filesystem.c</in>
+        <in>fs.h</in>
+        <in>mbr.h</in>
+        <in>sistema.h</in>
+        <in>system_call.c</in>
+        <in>system_call.h</in>
+        <in>volumi.c</in>
+        <in>volumi.h</in>
+      </df>
+      <df name="include" kind="SOURCE_LOGICAL_FOLDER">
+        <in>costanti.h</in>
+        <in>errno.h</in>
+        <in>es1370.h</in>
+        <in>mboot.h</in>
+        <in>stdarg.h</in>
+        <in>string.h</in>
+        <in>tipo.h</in>
+        <in>type.h</in>
+        <in>wchar.h</in>
+      </df>
+      <df name="io" kind="SOURCE_LOGICAL_FOLDER">
+        <in>io.cpp</in>
+      </df>
+      <df name="lib" kind="SOURCE_LOGICAL_FOLDER">
+        <in>errno.c</in>
+        <in>stdarg.c</in>
+        <in>string.c</in>
+        <in>wchar.c</in>
+      </df>
+      <df name="nucleo-fs" kind="SOURCE_LOGICAL_FOLDER">
+        <df name="boot" kind="SOURCE_LOGICAL_FOLDER">
+          <df name="boot" kind="SOURCE_LOGICAL_FOLDER">
+            <df name="grub" kind="SOURCE_LOGICAL_FOLDER">
+            </df>
+          </df>
+        </df>
+        <df name="fs" kind="SOURCE_LOGICAL_FOLDER">
+          <in>data.c</in>
+          <in>data.h</in>
+          <in>direntry.c</in>
+          <in>direntry.h</in>
+          <in>errno.c</in>
+          <in>errno.h</in>
+          <in>fat.c</in>
+          <in>fat.h</in>
+          <in>filesystem.c</in>
+          <in>fs.h</in>
+          <in>mbr.h</in>
+          <in>sistema.h</in>
+          <in>string.h</in>
+          <in>type.h</in>
+          <in>volumi.c</in>
+          <in>volumi.h</in>
+        </df>
+        <df name="include" kind="SOURCE_LOGICAL_FOLDER">
+          <in>costanti.h</in>
+          <in>errno.h</in>
+          <in>es1370.h</in>
+          <in>mboot.h</in>
+          <in>stdarg.h</in>
+          <in>string.h</in>
+          <in>tipo.h</in>
+          <in>type.h</in>
+          <in>wchar.h</in>
+        </df>
+        <df name="io" kind="SOURCE_LOGICAL_FOLDER">
+          <in>io.cpp</in>
+        </df>
+        <df name="lib" kind="SOURCE_LOGICAL_FOLDER">
+          <in>errno.c</in>
+          <in>stdarg.c</in>
+          <in>string.c</in>
+          <in>wchar.c</in>
+        </df>
+        <df name="sistema" kind="SOURCE_LOGICAL_FOLDER">
+          <in>sistema.cpp</in>
+        </df>
+        <df name="utente" kind="SOURCE_LOGICAL_FOLDER">
+          <df name="examples" kind="SOURCE_LOGICAL_FOLDER">
+          </df>
+          <df name="include" kind="SOURCE_LOGICAL_FOLDER">
+            <df name="songs" kind="SOURCE_LOGICAL_FOLDER">
+              <in>file_suono.h</in>
+              <in>still_alive.h</in>
+              <in>supermario.h</in>
+            </df>
+            <in>colors.h</in>
+            <in>keycodes.h</in>
+            <in>lib.h</in>
+            <in>sys.h</in>
+            <in>tipo.h</in>
+          </df>
+          <df name="prog" kind="SOURCE_LOGICAL_FOLDER">
+          </df>
+          <in>lib.cpp</in>
+        </df>
+        <df name="util" kind="SOURCE_LOGICAL_FOLDER">
+          <in>coff.cpp</in>
+          <in>coff.h</in>
+          <in>creatimg.cpp</in>
+          <in>decode.c</in>
+          <in>dos.h</in>
+          <in>doswap.cpp</in>
+          <in>elf.cpp</in>
+          <in>elf.h</in>
+          <in>fswap.cpp</in>
+          <in>interp.cpp</in>
+          <in>interp.h</in>
+          <in>nucleo.h</in>
+          <in>parse.c</in>
+          <in>showb.c</in>
+          <in>src.h</in>
+          <in>swap.cpp</in>
+          <in>swap.h</in>
+        </df>
+      </df>
+      <df name="sistema" kind="SOURCE_LOGICAL_FOLDER">
+        <in>sistema.cpp</in>
+      </df>
+      <df name="utente" kind="SOURCE_LOGICAL_FOLDER">
+        <df name="examples" kind="SOURCE_LOGICAL_FOLDER">
+        </df>
+        <df name="include" kind="SOURCE_LOGICAL_FOLDER">
+          <df name="songs" kind="SOURCE_LOGICAL_FOLDER">
+            <in>file_suono.h</in>
+            <in>still_alive.h</in>
+            <in>supermario.h</in>
+          </df>
+          <in>colors.h</in>
+          <in>keycodes.h</in>
+          <in>lib.h</in>
+          <in>sys.h</in>
+          <in>tipo.h</in>
+        </df>
+        <df name="prog" kind="SOURCE_LOGICAL_FOLDER">
+        </df>
+        <in>lib.cpp</in>
+        <in>utente.cpp</in>
+      </df>
+      <df name="util" kind="SOURCE_LOGICAL_FOLDER">
+        <in>coff.cpp</in>
+        <in>coff.h</in>
+        <in>creatimg.cpp</in>
+        <in>decode.c</in>
+        <in>dos.h</in>
+        <in>doswap.cpp</in>
+        <in>elf.cpp</in>
+        <in>elf.h</in>
+        <in>fswap.cpp</in>
+        <in>interp.cpp</in>
+        <in>interp.h</in>
+        <in>nucleo.h</in>
+        <in>parse.c</in>
+        <in>showb.c</in>
+        <in>src.h</in>
+        <in>swap.cpp</in>
+        <in>swap.h</in>
+      </df>
+    </df>
+    <logicalFolder name="ExternalFiles"
+                   displayName="Important Files"
+                   projectFiles="false"
+                   kind="IMPORTANT_FILES_FOLDER">
+      <itemPath>Makefile-Nucleo.mk</itemPath>
+      <itemPath>makefile</itemPath>
+    </logicalFolder>
+  </logicalFolder>
+  <sourceRootList>
+    <Elem>.</Elem>
+  </sourceRootList>
+  <projectmakefile>Makefile-Nucleo.mk</projectmakefile>
+  <confs>
+    <conf name="Default" type="0">
+      <toolsSet>
+        <developmentServer>localhost</developmentServer>
+        <compilerSet>GNU|GNU</compilerSet>
+        <platform>2</platform>
+      </toolsSet>
+      <makefileType>
+        <makeTool>
+          <buildCommandWorkingDir>.</buildCommandWorkingDir>
+          <buildCommand>$(MAKE) -f Makefile</buildCommand>
+          <cleanCommand>$(MAKE) -f Makefile clean</cleanCommand>
+          <executablePath></executablePath>
+          <ccTool>
+            <incDir>
+              <pElem>.</pElem>
+            </incDir>
+          </ccTool>
+        </makeTool>
+      </makefileType>
+      <item path="fs/backup/data.c" ex="true" tool="0">
+      </item>
+      <item path="fs/backup/data.h" ex="true" tool="3">
+      </item>
+      <item path="fs/backup/direntry.c" ex="true" tool="0">
+      </item>
+      <item path="fs/backup/direntry.h" ex="true" tool="3">
+      </item>
+      <item path="fs/backup/errno.h" ex="true" tool="3">
+      </item>
+      <item path="fs/backup/fat.c" ex="true" tool="0">
+      </item>
+      <item path="fs/backup/fat.h" ex="true" tool="3">
+      </item>
+      <item path="fs/backup/filesystem.c" ex="true" tool="0">
+      </item>
+      <item path="fs/backup/fs.h" ex="true" tool="3">
+      </item>
+      <item path="fs/backup/mbr.h" ex="true" tool="3">
+      </item>
+      <item path="fs/backup/sistema.h" ex="true" tool="3">
+      </item>
+      <item path="fs/backup/string.h" ex="true" tool="3">
+      </item>
+      <item path="fs/backup/type.h" ex="true" tool="3">
+      </item>
+      <item path="fs/backup/volumi.c" ex="true" tool="0">
+      </item>
+      <item path="fs/backup/volumi.h" ex="true" tool="3">
+      </item>
+      <item path="fs/data.c" ex="true" tool="0">
+      </item>
+      <item path="fs/data.h" ex="true" tool="3">
+      </item>
+      <item path="fs/direntry.c" ex="true" tool="0">
+      </item>
+      <item path="fs/direntry.h" ex="true" tool="3">
+      </item>
+      <item path="fs/fat.c" ex="true" tool="0">
+      </item>
+      <item path="fs/fat.h" ex="true" tool="3">
+      </item>
+      <item path="fs/filesystem.c" ex="true" tool="0">
+      </item>
+      <item path="fs/fs.h" ex="true" tool="3">
+      </item>
+      <item path="fs/mbr.h" ex="true" tool="3">
+      </item>
+      <item path="fs/sistema.h" ex="true" tool="3">
+      </item>
+      <item path="fs/system_call.c" ex="true" tool="0">
+      </item>
+      <item path="fs/system_call.h" ex="true" tool="3">
+      </item>
+      <item path="fs/volumi.c" ex="true" tool="0">
+      </item>
+      <item path="fs/volumi.h" ex="true" tool="3">
+      </item>
+      <item path="include/costanti.h" ex="true" tool="3">
+      </item>
+      <item path="include/errno.h" ex="true" tool="3">
+      </item>
+      <item path="include/es1370.h" ex="true" tool="3">
+      </item>
+      <item path="include/mboot.h" ex="true" tool="3">
+      </item>
+      <item path="include/stdarg.h" ex="true" tool="3">
+      </item>
+      <item path="include/string.h" ex="true" tool="3">
+      </item>
+      <item path="include/tipo.h" ex="true" tool="3">
+      </item>
+      <item path="include/type.h" ex="true" tool="3">
+      </item>
+      <item path="include/wchar.h" ex="true" tool="3">
+      </item>
+      <item path="io/io.cpp" ex="true" tool="1">
+      </item>
+      <item path="lib/errno.c" ex="true" tool="0">
+      </item>
+      <item path="lib/stdarg.c" ex="true" tool="0">
+      </item>
+      <item path="lib/string.c" ex="true" tool="0">
+      </item>
+      <item path="lib/wchar.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/fs/data.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/fs/data.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/fs/direntry.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/fs/direntry.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/fs/errno.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/fs/errno.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/fs/fat.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/fs/fat.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/fs/filesystem.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/fs/fs.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/fs/mbr.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/fs/sistema.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/fs/string.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/fs/type.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/fs/volumi.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/fs/volumi.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/include/costanti.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/include/errno.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/include/es1370.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/include/mboot.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/include/stdarg.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/include/string.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/include/tipo.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/include/type.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/include/wchar.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/io/io.cpp" ex="true" tool="1">
+      </item>
+      <item path="nucleo-fs/lib/errno.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/lib/stdarg.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/lib/string.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/lib/wchar.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/sistema/sistema.cpp" ex="true" tool="1">
+      </item>
+      <item path="nucleo-fs/utente/include/colors.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/utente/include/keycodes.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/utente/include/lib.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/utente/include/songs/file_suono.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/utente/include/songs/still_alive.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/utente/include/songs/supermario.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/utente/include/sys.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/utente/include/tipo.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/utente/lib.cpp" ex="true" tool="1">
+      </item>
+      <item path="nucleo-fs/util/coff.cpp" ex="true" tool="1">
+      </item>
+      <item path="nucleo-fs/util/coff.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/util/creatimg.cpp" ex="true" tool="1">
+      </item>
+      <item path="nucleo-fs/util/decode.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/util/dos.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/util/doswap.cpp" ex="true" tool="1">
+      </item>
+      <item path="nucleo-fs/util/elf.cpp" ex="true" tool="1">
+      </item>
+      <item path="nucleo-fs/util/elf.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/util/fswap.cpp" ex="true" tool="1">
+      </item>
+      <item path="nucleo-fs/util/interp.cpp" ex="true" tool="1">
+      </item>
+      <item path="nucleo-fs/util/interp.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/util/nucleo.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/util/parse.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/util/showb.c" ex="true" tool="0">
+      </item>
+      <item path="nucleo-fs/util/src.h" ex="true" tool="3">
+      </item>
+      <item path="nucleo-fs/util/swap.cpp" ex="true" tool="1">
+      </item>
+      <item path="nucleo-fs/util/swap.h" ex="true" tool="3">
+      </item>
+      <item path="sistema/sistema.cpp" ex="true" tool="1">
+      </item>
+      <item path="utente/include/colors.h" ex="true" tool="3">
+      </item>
+      <item path="utente/include/keycodes.h" ex="true" tool="3">
+      </item>
+      <item path="utente/include/lib.h" ex="true" tool="3">
+      </item>
+      <item path="utente/include/songs/file_suono.h" ex="true" tool="3">
+      </item>
+      <item path="utente/include/songs/still_alive.h" ex="true" tool="3">
+      </item>
+      <item path="utente/include/songs/supermario.h" ex="true" tool="3">
+      </item>
+      <item path="utente/include/sys.h" ex="true" tool="3">
+      </item>
+      <item path="utente/include/tipo.h" ex="true" tool="3">
+      </item>
+      <item path="utente/lib.cpp" ex="true" tool="1">
+      </item>
+      <item path="utente/utente.cpp" ex="true" tool="1">
+      </item>
+      <item path="util/coff.cpp" ex="true" tool="1">
+      </item>
+      <item path="util/coff.h" ex="true" tool="3">
+      </item>
+      <item path="util/decode.c" ex="true" tool="0">
+      </item>
+      <item path="util/dos.h" ex="true" tool="3">
+      </item>
+      <item path="util/doswap.cpp" ex="true" tool="1">
+      </item>
+      <item path="util/elf.cpp" ex="true" tool="1">
+      </item>
+      <item path="util/elf.h" ex="true" tool="3">
+      </item>
+      <item path="util/fswap.cpp" ex="true" tool="1">
+      </item>
+      <item path="util/interp.cpp" ex="true" tool="1">
+      </item>
+      <item path="util/interp.h" ex="true" tool="3">
+      </item>
+      <item path="util/nucleo.h" ex="true" tool="3">
+      </item>
+      <item path="util/parse.c" ex="true" tool="0">
+      </item>
+      <item path="util/showb.c" ex="true" tool="0">
+      </item>
+      <item path="util/src.h" ex="true" tool="3">
+      </item>
+      <item path="util/swap.cpp" ex="true" tool="1">
+      </item>
+      <item path="util/swap.h" ex="true" tool="3">
+      </item>
+    </conf>
+  </confs>
+</configurationDescriptor>

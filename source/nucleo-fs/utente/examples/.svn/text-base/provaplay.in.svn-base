@@ -1,0 +1,89 @@
+#include <sys.h>
+#include <lib.h>
+#include <colors.h>
+#include <es1370.h>
+#include <songs/still_alive.h>
+
+
+
+process audio_pA body provaaudio(3), 201, LIV_UTENTE;
+process audio_pB body provacomandi(3), 201, LIV_UTENTE;
+
+
+semaphore audio_sincr value 0;
+semaphore audio_mutex value 1;
+char audio_c;
+bool audio_play = false;
+bool audio_terminate = false;
+int  audio_waiting = 0;
+
+bool audio_wait_play()
+{
+	sem_wait(audio_mutex);
+	while (!audio_play && !audio_terminate) {
+		sem_signal(audio_mutex);
+		audio_waiting++;
+		sem_wait(audio_sincr);
+		sem_wait(audio_mutex);
+	}
+	sem_signal(audio_mutex);
+	return audio_terminate;
+}
+
+void audio_signal(bool b, bool t)
+{
+	sem_wait(audio_mutex);
+	audio_play = b;
+	audio_terminate = t;
+	if (audio_waiting) {
+		audio_waiting--;
+		sem_signal(audio_sincr);
+	}
+	sem_signal(audio_mutex);
+}
+
+process_body provaaudio(int a){
+	
+	while(1)
+	{
+		if (audio_wait_play())
+			break;
+		printf(a, "\nMando comando di suono\n");	
+		play(Sound, SIZESOUND, RATE, MODE, 1);	
+		printf(a, "\nCanale rilasciato\n");	
+	}
+}
+
+process_body provacomandi(int a){
+	printf(a, "Ecco il menu\n");	
+	printf(a, "E: Esegui\n");	
+	printf(a, "P: Metti in pausa\n");	
+	printf(a, "R: Rimetti in esecuzione\n");	
+	printf(a, "S: Ferma l'esecuzione, rilascia il canale\n");	
+	printf(a, "Q: Esci\n");	
+	while(1)
+	{
+		readvterm_n(a, &audio_c, 1, VTERM_NOECHO);
+		switch(audio_c)
+		{
+			case 'E': case 'e':
+				audio_signal(true, false); break;
+			case 'P': case 'p':
+				sndcommand(1, ES1370_PAUSE);
+				break;
+			case 'R': case 'r':
+				sndcommand(1, ES1370_RESUME);
+				break;
+			case 'S': case 's':
+				audio_signal(false, false);
+				sndcommand(1, ES1370_STOP);
+				break;
+			case 'Q': case 'q':
+				audio_signal(false, true);
+				sndcommand(1, ES1370_STOP);
+				terminate_p();
+				break;
+		}
+	}
+}
+

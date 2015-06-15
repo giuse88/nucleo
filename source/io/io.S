@@ -1,0 +1,1372 @@
+#define ASM 1
+#define ASM 1
+#include "costanti.h"
+
+////////////////////////////////////////////////////////////////////////////////
+//                                 COSTANTI                                   //
+////////////////////////////////////////////////////////////////////////////////
+
+// Tipi delle interruzioni delle chiamate di sistema usate
+// Devono coincidere con quelli usati in sistema.s e utente.s
+//
+.set tipo_a,  	TIPO_A
+.set tipo_t,  	TIPO_T
+.set tipo_si, 	TIPO_SI
+.set tipo_w,  	TIPO_W
+.set tipo_s,  	TIPO_S
+.set tipo_nd, 	TIPO_ND
+.set tipo_d,  	TIPO_D
+.set tipo_l,  TIPO_L
+.set tipo_ud, TIPO_UD
+
+
+.set tipo_ud, TIPO_UD
+.set tipo_tra, TIPO_TRA
+.set tipo_re, TIPO_RE
+.set tipo_d, TIPO_D
+
+// Tipi delle interruzioni usate per interfacciarsi al modulo
+//  sistema
+//
+.set tipo_ap,	TIPO_AP
+.set tipo_ape,  TIPO_APE
+.set tipo_wfi,	TIPO_WFI
+.set tipo_va,   TIPO_VA
+.set tipo_p,    TIPO_P
+.set tipo_ab,   TIPO_AB
+.set tipo_fg,   TIPO_FG
+.set tipo_ma, 	TIPO_MA
+.set tipo_mf,	TIPO_MF
+.set io_tipo_gm, IO_TIPO_GM
+.set tipo_palloc, TIPO_PALLOC
+.set tipo_pfree, TIPO_PFREE
+.set tipo_getid, TIPO_GETID
+.set tipo_getidp, TIPO_GETIDP
+
+.set tipo_iospaceinit,  TIPO_IOSPACEINIT
+.set tipo_iospaceread,  TIPO_IOSPACEREAD
+.set tipo_iospacewrite, TIPO_IOSPACEWRITE
+
+
+// Tipi delle interruzioni usate dalle primitive di IO
+// Devono coincidere con quelli usati in utente.s
+//
+.set io_tipo_rsen,  IO_TIPO_RSEN
+.set io_tipo_rseln, IO_TIPO_RSELN
+.set io_tipo_wsen,  IO_TIPO_WSEN
+.set io_tipo_wse0,  IO_TIPO_WSE0
+.set io_tipo_rcon,  IO_TIPO_RCON		
+.set io_tipo_wcon,  IO_TIPO_WCON		
+.set io_tipo_inic,  IO_TIPO_INIC
+
+.set io_tipo_rkbd,  IO_TIPO_RKBD		
+.set io_tipo_ikbd,  IO_TIPO_IKBD		
+.set io_tipo_skbd,  IO_TIPO_SKBD		
+.set io_tipo_wfikbd, IO_TIPO_WFIKBD
+.set io_tipo_smon,  IO_TIPO_SMON		
+.set io_tipo_wmon,  IO_TIPO_WMON		
+.set io_tipo_cmon,  IO_TIPO_CMON		
+.set io_tipo_gmon,  IO_TIPO_GMON		
+.set io_tipo_lkbd,  IO_TIPO_LKBD
+.set io_tipo_kmon,  IO_TIPO_KMON		
+.set io_tipo_pkbd,  IO_TIPO_PKBD
+
+// tipi per le primitive di trasmissione/ricezione eth
+.set io_tipo_ethr,	IO_TIPO_ETHR
+.set io_tipo_etht,	IO_TIPO_ETHT
+
+.set io_tipo_sndcommand, 	IO_TIPO_SNDCOMMAND
+.set io_tipo_play, 	IO_TIPO_PLAY
+.set io_tipo_ak_set,	IO_TIPO_AK_SET
+.set io_tipo_ak_get,	IO_TIPO_AK_GET
+
+// interfaccia PCI
+.set io_tipo_pcif,	IO_TIPO_PCIF
+.set io_tipo_pcir,	IO_TIPO_PCIR
+.set io_tipo_pciw,	IO_TIPO_PCIW
+
+//MIO
+.set tipo_get_part , 	 TIPO_GET_PART
+.set tipo_write_part_n,  TIPO_WRITE_PART_N 
+.set tipo_read_part_n,   TIPO_READ_PART_N
+.set  io_tipo_get_time,  IO_TIPO_TIME
+.set  io_tipo_get_date,  IO_TIPO_DATE 
+
+//FS 
+.set tipo_open   ,  TIPO_OPEN 
+.set tipo_close  ,  TIPO_CLOSE 
+.set tipo_read   ,  TIPO_READ 
+.set tipo_write  ,  TIPO_WRITE 
+.set tipo_lseek  ,  TIPO_LSEEK 
+.set tipo_remove ,  TIPO_REMOVE
+.set tipo_rename ,  TIPO_RENAME
+.set tipo_rmdir  ,  TIPO_RMDIR
+.set tipo_chdir  ,  TIPO_CHDIR 
+.set tipo_mkdir  ,  TIPO_MKDIR 
+.set tipo_get_cwd,  TIPO_GETCWD 
+.set tipo_err,      TIPO_ERR
+  	
+////////////////////////////////////////////////////////////////////////////////
+//                  MACRO PER LA MANIPOLAZIONE DEI PARAMETRI                  //
+////////////////////////////////////////////////////////////////////////////////
+
+// Copia dei parametri di una chiamata di sistema dalla pila utente
+//  alla pila sistema
+.macro copia_param n_long offset
+        movl $\offset, %ecx
+        movl 4(%esp, %ecx, 4), %eax     // cs in eax
+        testl $3, %eax			// verifica del livello di privilegio
+					//  del chiamante
+        jz 1f                           // copia da pila sistema
+
+        movl 12(%esp, %ecx, 4), %eax    // vecchio esp (della pila utente)
+					//  in eax
+        leal 4(%eax), %esi		// indirizzo del primo parametro in
+					//  esi.set tipo_re, TIPO_RE
+        jmp 2f
+1:
+        leal 16(%esp, %ecx, 4), %esi	// indirizzo del primo parametro in esi
+2:
+        movl $\n_long, %eax		// creazione in pila dello spazio per
+        shll $2, %eax			//  la copia dei parametri
+        subl %eax, %esp
+        leal (%esp), %edi		// indirizzo della destinazione del
+					//  primo parametro in edi
+
+        movl $\n_long, %ecx
+        cld
+        rep
+           movsl			// copia dei parametri
+.endm
+
+// Salvataggio dei registri in pila
+.macro salva_registri
+	pushl %eax
+	pushl %ecx
+	pushl %edx
+	pushl %ebx
+	pushl %esi
+	pushl %edi
+	pushl %ebp
+.endm
+
+// Caricamento dei registri dalla pila (duale rispetto a salva_registri)
+.macro carica_registri
+	popl %ebp
+	popl %edi
+	popl %esi
+	popl %ebx
+	popl %edx
+	popl %ecx
+	popl %eax
+.endm
+
+// salvataggio dei registri in pila per chiamate di sistema che ritornano
+//  un valore in eax, che non viene salvato
+.macro salva_reg_rit
+
+	pushl %ecx
+	pushl %edx
+	pushl %ebx
+	pushl %esi
+	pushl %edi
+	pushl %ebp
+
+.endm
+
+
+// ripristino dei registri (tutti meno eax) dalla pila (duale rispetto a
+//  salva_reg_rit)
+.macro carica_reg_rit
+
+	popl %ebp
+	popl %edi
+	popl %esi
+	popl %ebx
+	popl %edx
+	popl %ecx
+
+.endm
+
+// Chiama _fill_gate con i parametri specificati
+.macro fill_io_gate gate off
+	pushl $LIV_UTENTE
+	pushl $\off
+	pushl $\gate
+	call _fill_gate
+	addl $12, %esp
+.endm
+
+.macro check_cavallo
+	testl $0x80000000, %eax
+	jnz 1f
+	pushl %eax
+	pushl $param_err
+	pushl $2
+	call _flog
+	addl $12, %esp
+	int $tipo_ab
+1:
+
+.endm
+
+.macro cavallo_di_troia offset
+
+	movl (\offset * 4) (%esp), %eax
+	check_cavallo
+.endm
+
+.macro cavallo_di_troia2 offset1 offset2
+
+	movl (\offset1 * 4) (%esp), %eax
+	addl (\offset2 * 4) (%esp), %eax
+	decl %eax
+	check_cavallo
+.endm
+
+.macro cavallo_di_troia3 offset1 offset2
+
+	movl (\offset1 * 4) (%esp), %eax
+	movl (\offset2 * 4) (%esp), %ebx
+	addl (%ebx), %eax
+	decl %eax
+	check_cavallo
+.endm
+
+.global start, _start
+start:
+_start:	jmp _cmain
+
+////////////////////////////////////////////////////////////////////////////////
+//                             SEZIONE DATI                                   //
+////////////////////////////////////////////////////////////////////////////////
+
+	.data
+
+param_err:
+	.asciz "parametro errato %x"
+
+// Descrittori delle interfacce seriali
+	.global _com		// non comi, como
+_com:	.word	0x03f8		// com[0].indreg.iRBR
+	.word	0x03f8		// com[0].indreg.iTHR
+	.word	0x03fd		// com[0].indreg.iLSR
+	.word	0x03f9		// com[0].indreg.iIER
+	.word	0x03fa		// com[0].indreg.iIIR
+	.word   0		// padding
+	.long	0		// com[0].mutex
+	.long	0		// com[0].sincr
+	.long	0		// com[0].cont
+	.long	0		// com[0].punt
+	.long	0		// com[0].funzione
+	.long	0		// com[0].stato
+	.word	0x02f8		// com[1].indreg.iRBR
+	.word	0x02f8		// com[1].indreg.iTHR
+	.word	0x03fd		// com[1].indreg.iLSR
+	.word	0x02f9		// com[1].indreg.iIER
+	.word	0x02fa		// com[1].indreg.iIIR
+	.word   0		// padding
+	.long	0		// com[1].mutex
+	.long	0		// com[1].sincr
+	.long	0		// com[1].cont
+	.long	0		// com[1].punt
+	.long	0		// com[1].funzione
+	.long	0		// com[1].stato
+
+// descrittore console
+	.global _console	// [9.5]
+_console:
+	.long	0		// mutex
+	.long	0		// sincr
+	// descrittore tastiera
+	.long	0		// kbd.vkbd
+	.long	0		// kbd.punt
+	.long   0		// kbd.cont
+	.byte	0		// kbd.shift
+	// tab
+	.byte	0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19
+	.byte	0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26
+	.byte	0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x39, 0x1C, 0x0e
+	// tabmin
+        .byte  'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p' 
+        .byte  'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l' 
+        .byte  'z', 'x', 'c', 'v', 'b', 'n', 'm', ' ', '\n', '\b'
+	// tabmai
+        .byte  'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'
+        .byte  'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'
+        .byte  'Z', 'X', 'C', 'V', 'B', 'N', 'M', ' ', '\r', '\b'
+	// Descrittore del video
+	.long	0		// vid.video
+	.long	0		// vid.x
+	.long   0		// vid.y
+	.byte   0x4B		// vid.attr
+	.byte	0		// allineamento
+	.word	0		// allineamento
+
+// Descrittori delle interfacce di rete
+	.global _deseth
+_deseth:
+	.byte	0	// presente
+	.byte	0	// padding
+	.word	0x0037	//deseth[0].CMD		8
+	.word	0x004c	//deseth[0].MPC		32
+	.word	0x003c	//deseth[0].IMR		16
+	.word	0x003e	//deseth[0].ISR		16
+
+	.word	0x0030	//deseth[0].RBSTART	32
+	.word	0x0038	//deseth[0].CAPR	16
+	.word	0x0044	//deseth[0].RCR		32
+	
+	.word	0x0010	//deseth[0].TSD0	32
+	.word	0x0020	//deseth[0].TSAD0	32
+	.word	0x0040	//deseth[0].TCR		32
+	.word	0	// padding
+	
+	.long	0x00000000	//deseth[0].sincr
+	.long	0x00000000	//deseth[0].mutex
+	
+	.long	0x00000000	//deseth[0].tx_err
+	.long	0x00000000	//deseth[0].rx_err
+	
+	.long	0x00000000	//deseth[0].u_rx_buf
+	.long	0x00000000	//deseth[0].u_rx_quanti
+	.long	0x00000000	//deseth[0].u_tx_buf
+	.long	0x00000000	//deseth[0].u_tx_quanti
+
+	.long	0x00000000	//deseth[0].irq;
+
+	.byte	0	// presente
+	.byte	0	// padding
+	.word	0x0037	//deseth[0].CMD		8
+	.word	0x004c	//deseth[0].MPC		32
+	.word	0x003c	//deseth[0].IMR		16
+	.word	0x003e	//deseth[0].ISR		16
+
+	.word	0x0030	//deseth[0].RBSTART	32
+	.word	0x0038	//deseth[0].CAPR	16
+	.word	0x0044	//deseth[0].RCR		32
+	
+	.word	0x0010	//deseth[0].TSD0	32
+	.word	0x0020	//deseth[0].TSAD0	32
+	.word	0x0040	//deseth[0].TCR		32
+	.word	0	// padding
+	
+	.long	0x00000000	//deseth[0].sincr
+	.long	0x00000000	//deseth[0].mutex
+	
+	.long	0x00000000	//deseth[0].tx_err
+	.long	0x00000000	//deseth[0].rx_err
+	
+	.long	0x00000000	//deseth[0].u_rx_buf
+	.long	0x00000000	//deseth[0].u_rx_quanti
+	.long	0x00000000	//deseth[0].u_tx_buf
+	.long	0x00000000	//deseth[0].u_tx_quanti
+
+	.long	0x00000000	//deseth[0].irq;
+
+
+////////////////////////////////////////////////////////////////////////////////
+//                            SEZIONE TESTO                                   //
+////////////////////////////////////////////////////////////////////////////////
+
+	.text
+
+////////////////////////////////////////////////////////////////////////////////
+//                          CHIAMATE DI SISTEMA                               //
+////////////////////////////////////////////////////////////////////////////////
+
+	.text
+	.global _activate_p
+_activate_p:
+	int $tipo_a
+	ret
+
+	.global _terminate_p // [7.1]
+_terminate_p:
+	int $tipo_t
+	ret
+
+	.global _sem_ini
+_sem_ini:
+	int $tipo_si
+	ret
+
+	.global _sem_wait	// [7.1]
+_sem_wait:
+	int $tipo_w
+	ret
+
+	.global _sem_signal	// [7.1]
+_sem_signal:
+	int $tipo_s
+	ret
+
+	.global _pci_read
+_pci_read:
+	int $io_tipo_pcir
+	ret
+
+////////////////////////////////////////////////////////////////////////////////
+//                     INTERFACCIA VERSO IL MODULO SISTEMA                    //
+////////////////////////////////////////////////////////////////////////////////
+
+	.global _activate_pe
+_activate_pe:	// [7.1]
+	int $tipo_ape
+	ret
+
+	.global _wfi	// [9.1]
+_wfi:
+	int $tipo_wfi
+	ret
+
+	.global _panic
+_panic:
+	int $tipo_p
+	ret
+
+	.global _abort_p
+_abort_p:
+	int $tipo_ab
+	ret
+
+	.global _fill_gate
+_fill_gate:
+	int $tipo_fg
+	ret
+
+	.global _delay
+_delay:
+	int $tipo_d
+	ret
+
+	.global _log
+_log:
+	int $tipo_l
+	ret
+
+	.global _writevid
+_writevid:
+	int $io_tipo_wcon
+	ret
+
+	.global _graphic_mode
+_graphic_mode:
+	int $io_tipo_gm
+	ret
+
+// interfaccia alla primitiva trasforma del modulo sistema per il modulo I/O
+.global _trasforma
+_trasforma:
+	int $tipo_tra
+	ret
+
+	.global _udelay
+_udelay:
+	int $tipo_ud
+	ret
+	
+	.global _resident
+_resident:
+	int $tipo_re
+	ret	
+
+	.global _phys_alloc
+_phys_alloc:
+	int $tipo_palloc
+	ret
+
+	.global _phys_free
+_phys_free:
+	int $tipo_pfree
+	ret
+
+	.global _get_id
+_get_id:
+	int $tipo_getid
+	ret
+
+	.global _get_id_p
+_get_id_p:
+	int $tipo_getidp
+	ret
+    
+	.global _io_space_write
+_io_space_write: 
+	int $tipo_iospacewrite
+	ret
+
+	.global _io_space_read
+_io_space_read:
+	int $tipo_iospaceread
+	ret
+
+	.global _io_space_init
+_io_space_init:
+	int $tipo_iospaceinit
+	ret
+
+.global _pci_find
+_pci_find:
+	int $io_tipo_pcif
+	ret
+
+.global _pci_write
+_pci_write:
+	int $io_tipo_pciw
+	ret
+
+////////////////////////////////////////////////////////////////////////////////
+//                         FUNZIONI DI SUPPORTO                               //
+////////////////////////////////////////////////////////////////////////////////
+
+// Ingresso di un byte da una porta di IO
+	.global _inputb
+_inputb:
+	pushl %eax
+	pushl %edx
+	movl 12(%esp), %edx
+	inb %dx, %al
+	movl 16(%esp), %edx
+	movb %al, (%edx)
+	popl %edx
+	popl %eax
+	ret
+
+// Uscita di un byte su una porta di IO
+	.global _outputb
+_outputb:
+	pushl %eax
+	pushl %edx
+	movb 12(%esp), %al
+	movl 16(%esp), %edx
+	outb %al, %dx
+	popl %edx
+	popl %eax
+	ret
+
+// Ingresso di una word da una porta di IO
+	.global _inputw
+_inputw:
+	pushl %eax
+	pushl %edx
+	movl 12(%esp), %edx
+	inw %dx, %ax
+	movl 16(%esp), %edx
+	movw %ax, (%edx)
+	popl %edx
+	popl %eax
+	ret
+
+// Uscita di una word su una porta di IO
+	.global _outputw
+_outputw:
+	pushl %eax
+	pushl %edx
+	movw 12(%esp), %ax
+	movl 16(%esp), %edx
+	outw %ax, %dx
+	popl %edx
+	popl %eax
+	ret
+
+// Ingresso di una doppia parola da una porta di IO
+	.global _inputl
+_inputl:
+	pushl %eax
+	pushl %edx
+	movl 12(%esp), %edx
+	inl %dx, %eax
+	movl 16(%esp), %edx
+	movl %eax, (%edx)
+	popl %edx
+	popl %eax
+	ret
+
+// scrive una doppia parola in una porta di I/O
+	.global _outputl
+_outputl:
+	pushl %eax
+	pushl %edx
+	movl 12(%esp), %eax
+	movl 16(%esp), %edx
+	outl %eax, %dx
+	popl %edx
+	popl %eax
+	ret
+
+// Ingresso di un buffer continuo da un buffer di IO di word
+	.global _inputbuffw
+_inputbuffw:
+	pushl %eax
+	pushl %edx
+	pushl %edi
+	pushl %ecx
+	
+	movl 20(%esp), %edx
+	movl 24(%esp), %edi
+	movl 28(%esp),%ecx
+	cld
+	rep
+	insw
+	
+	popl %ecx
+	popl %edi
+	popl %edx
+	popl %eax
+	ret
+
+// Uscita di un buffer continuo su una buffer di IO di word
+	.global _outputbuffw
+_outputbuffw:
+	pushl %eax
+	pushl %edx
+	pushl %esi
+	pushl %ecx
+	
+	movl 24(%esp), %edx
+	movl 20(%esp), %esi
+	movl 28(%esp),%ecx
+	cld
+	rep
+	outsw
+	
+	popl %ecx
+	popl %esi
+	popl %edx
+	popl %eax
+	ret
+
+// Inizio dell' ingresso da una interfaccia seriale
+	.global _go_inputse
+_go_inputse:
+	pushl %eax
+	pushl %edx
+
+	movl 12(%esp), %edx		// ind. di IER in edx
+	inb %dx, %al
+	orb $0x01, %al			// abilitazione dell' interfaccia a
+					//  generare interruzioni in ingresso
+	outb %al, %dx
+
+	popl %edx
+	popl %eax
+	ret
+
+// Fine dell' ingresso da un' interfaccia seriale
+	.global _halt_inputse
+_halt_inputse:
+	pushl %eax
+	pushl %edx
+
+	movl 12(%esp), %edx		// ind. di IER in edx
+	inb %dx, %al
+	and $0xfe, %al
+	outb %al, %dx			// disabilitazione della generazione
+					//  di interruzioni
+	popl %edx
+	popl %eax
+	ret
+
+// Inizio dell' uscita su interfaccia seriale
+	.global _go_outputse
+_go_outputse:
+	pushl %eax
+	pushl %edx
+
+	movl 12(%esp), %edx		// ind. di IER in edx
+	inb %dx, %al
+	orb $0x02, %al
+	outb %al, %dx
+
+	popl %edx
+	popl %eax
+	ret
+
+// Fine dell' uscita su interfaccia seriale
+	.global _halt_outputse
+_halt_outputse:
+	pushl %eax
+	pushl %edx
+
+	movl 12(%esp), %edx		// ind. di IER in edx
+	inb %dx, %al
+	and $0xfd, %al
+	outb %al, %dx
+
+	popl %edx
+	popl %eax
+	ret
+
+// Indirizzi delle porte delle interfacce seriali
+.set LCR1, 0x03fb
+.set LCR2, 0x02fb
+.set DLR_LSB1, 0x03f8
+.set DLR_LSB2, 0x02f8
+.set DLR_MSB1, 0x03f9
+.set DLR_MSB2, 0x02f9
+.set IER1, 0x03f9
+.set IER2, 0x02f9
+.set RBR1, 0x03f8
+.set RBR2, 0x02f8
+.set MCR1, 0x03fc
+.set MCR2, 0x02fc
+
+
+// Inizializzazione delle interfacce seriali
+	.global _com_setup
+_com_setup:
+	pushl %eax
+	pushl %edx
+
+	movb $0x80, %al
+	movw $LCR1, %dx
+	outb %al, %dx
+	movw $0x000c, %ax
+	movw $DLR_LSB1, %dx
+	outb %al, %dx
+	movb %ah, %al
+	movw $DLR_MSB1, %dx
+	outb %al, %dx
+	movb $0x03, %al
+	movw $LCR1, %dx
+	outb %al, %dx
+	movb $0x00, %al
+	movw $IER1, %dx
+	outb %al, %dx
+	movw $RBR1, %dx
+	movw $MCR1, %dx			// abilitazione porta 3-state
+	movb $0b00001000, %al
+	outb %al, %dx
+	inb %dx, %al
+
+	movb $0x80, %al
+	movw $LCR2, %dx
+	outb %al, %dx
+	movw $0x000c, %ax
+	movw $DLR_LSB2, %dx
+	outb %al, %dx
+	movb %ah, %al
+	movw $DLR_MSB2, %dx
+	outb %al, %dx
+	movb $0x03, %al
+	movw $LCR2, %dx
+	outb %al, %dx
+	movb $0x00, %al
+	movw $IER2, %dx
+	outb %al, %dx
+	movw $RBR2, %dx
+	movw $MCR2, %dx
+	movb $0b00001000, %al
+	outb %al, %dx
+
+	inb %dx, %al
+
+	popl %edx
+	popl %eax
+
+	ret
+
+.set KBD_WCB,	0x60
+.set KBD_RCB,	0x20
+
+.macro wait_kbd
+1:	inb $0x64, %al	  // leggi stato
+	testb $0x02, %al  // busy?
+	jnz 1b
+.endm
+
+	.global _go_inputkbd
+_go_inputkbd:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl %eax
+
+	movw 12(%ebp), %dx
+	movb $KBD_WCB, %al
+	outb %al, %dx
+	movw 8(%ebp), %dx
+	movb $0x61, %al
+	outb %al, %dx
+	movw 12(%ebp), %dx
+1:	inb %dx, %al	
+	testb $0x02, %al
+	jnz 1b
+
+	popl %eax
+	leave
+	ret
+
+	.global _kbd_set_leds
+_kbd_set_leds:
+	pushl %ebp
+	movl  %esp, %ebp
+	pushl %eax
+
+	wait_kbd
+	movb $0xad, %al // disabilita tastiera
+	outb %al, $0x64
+	wait_kbd
+	movb $0xed, %al   // comando "set led"
+	outb %al, $0x60
+	wait_kbd
+	movb 8(%ebp), %al // stato dei led
+	outb %al, $0x60
+	wait_kbd
+	movb $0xae, %al // abilita tastiera
+	outb %al, $0x64
+	
+	leave
+	ret
+
+	.global _halt_inputkbd
+_halt_inputkbd:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl %eax
+
+	movw 12(%ebp), %dx
+	movb $KBD_WCB, %al
+	outb %al, %dx
+	movw 8(%ebp), %dx
+	movb $0x60, %al
+	outb %al, %dx
+	movw 12(%ebp), %dx
+1:	inb %dx, %al	 
+	testb $0x02, %al 
+	jnz 1b
+
+	popl %eax
+	leave
+	ret
+
+// indirizzi delle porte relative alla gestione del cursore, nel controllore 
+// della scheda video
+.set CUR_HIGH, 0x0e
+.set CUR_LOW, 0x0f
+.set CUR_START, 0x0a
+.set ADD_P, 0x03d4
+.set DAT_P, 0x03d5
+
+	.global _console_set_cursor_size
+_console_set_cursor_size:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl %edx
+	pushl %eax
+
+	movw $ADD_P, %dx
+	movb $CUR_START, %al
+	outb %al, %dx
+	movw $DAT_P, %dx
+	movl 8(%ebp), %eax
+	andb $0x1f, %al
+	outb %al, %dx
+
+	popl %eax
+	popl %edx
+	leave
+	ret
+
+// visualizza il cursore nella posizione passata come parametro
+	.global _console_cursor
+_console_cursor:
+	pushl %ebp
+	movl %esp, %ebp
+	pushl %edx
+	pushl %eax
+
+	movw $ADD_P, %dx
+	movb $CUR_HIGH, %al
+	outb %al, %dx
+	movw $DAT_P, %dx
+	movw 8(%ebp), %ax
+	movb %ah, %al
+	outb %al, %dx
+	movw $ADD_P, %dx
+	movb $CUR_LOW, %al
+	outb %al, %dx
+	movw $DAT_P, %dx
+	movw 8(%ebp), %ax
+	outb %al, %dx
+
+	popl %eax
+	popl %edx
+	leave
+	ret
+
+// Inizializzazione dei gate per le primitive di IO
+	.global _fill_io_gates
+_fill_io_gates:
+	pushl %ebp
+	movl %esp, %ebp
+
+	fill_io_gate	io_tipo_rsen	a_readse_n
+	fill_io_gate	io_tipo_rseln	a_readse_ln
+	fill_io_gate	io_tipo_wsen	a_writese_n
+	fill_io_gate	io_tipo_wse0	a_writese_0
+	fill_io_gate	io_tipo_rcon	a_readconsole
+	fill_io_gate	io_tipo_wcon	a_writeconsole
+	fill_io_gate	io_tipo_inic	a_iniconsole
+
+	fill_io_gate	io_tipo_rkbd	a_vkbd_read
+	fill_io_gate	io_tipo_ikbd	a_vkbd_intr_enable
+	fill_io_gate	io_tipo_skbd	a_vkbd_switch
+	fill_io_gate	io_tipo_wfikbd	a_vkbd_wfi
+	fill_io_gate	io_tipo_smon	a_vmon_switch
+	fill_io_gate	io_tipo_wmon	a_vmon_write_n
+	fill_io_gate	io_tipo_cmon	a_vmon_setcursor
+	fill_io_gate	io_tipo_gmon	a_vmon_getsize
+	fill_io_gate	io_tipo_lkbd	a_vkbd_leds
+	fill_io_gate	io_tipo_kmon	a_vmon_cursor_shape
+	fill_io_gate	io_tipo_pkbd	a_vkbd_send
+
+//inizializzazione gates per le primitive di io dell'interfaccia ethernet	
+	fill_io_gate	io_tipo_ethr	a_eth_receive
+	fill_io_gate	io_tipo_etht	a_eth_transmit
+	
+	
+//inizializzazione gates per le primitive di io della scheda audio
+	fill_io_gate	io_tipo_sndcommand	a_es1370_sndcmd
+	fill_io_gate	io_tipo_play	a_es1370_play
+#if 0
+	fill_io_gate	io_tipo_ak_set	a_ak4531_set
+	fill_io_gate	io_tipo_ak_get	a_ak4531_get
+#endif
+
+//date and time
+	fill_io_gate    io_tipo_get_date   a_get_date
+        fill_io_gate    io_tipo_get_time   a_get_time
+//fs
+	fill_io_gate    tipo_open 	   a_open 
+	fill_io_gate    tipo_close 	   a_close
+	fill_io_gate    tipo_read 	   a_read
+	fill_io_gate    tipo_write 	   a_write
+	fill_io_gate    tipo_lseek 	   a_lseek
+	fill_io_gate    tipo_remove 	   a_remove
+	fill_io_gate	tipo_rename	   a_rename
+	fill_io_gate    tipo_rmdir 	   a_rmdir
+	fill_io_gate    tipo_chdir 	   a_chdir
+	fill_io_gate    tipo_mkdir 	   a_mkdir
+	fill_io_gate    tipo_get_cwd 	   a_get_cwd
+	fill_io_gate    tipo_err 	   a_get_error
+
+	leave
+	ret
+
+////////////////////////////////////////////////////////////////////////////////
+//                            PRIMITIVE ETH                                   //
+////////////////////////////////////////////////////////////////////////////////
+
+.global a_eth_transmit
+	.extern _c_eth_transmit
+a_eth_transmit: #routine int $io_tipo_etht
+	salva_registri
+	copia_param 4 7
+	cavallo_di_troia 1
+	cavallo_di_troia2 1 2
+	cavallo_di_troia 3
+	call _c_eth_transmit
+	addl $16, %esp
+	carica_registri
+	iret
+
+.global a_eth_receive
+	.extern _c_eth_receive
+a_eth_receive:
+	salva_registri
+	copia_param 4 7
+	cavallo_di_troia 1
+	cavallo_di_troia2 1 2
+	cavallo_di_troia 3
+	call _c_eth_receive
+	addl $16, %esp
+	carica_registri
+	iret
+
+////////////////////////////////////////////////////////////////////////////////
+//                              PRIMITIVE DI IO                               //
+////////////////////////////////////////////////////////////////////////////////
+
+	.extern _c_readse_n
+a_readse_n:
+	salva_registri
+	copia_param 4 7
+	cavallo_di_troia 1
+	cavallo_di_troia2 1 2
+	cavallo_di_troia 3
+	call _c_readse_n
+	addl $16, %esp
+	carica_registri
+	iret
+
+	.extern _c_readse_ln
+a_readse_ln:
+	salva_registri
+	copia_param 4 7
+	cavallo_di_troia 1
+	cavallo_di_troia 2
+	cavallo_di_troia3 1 2
+	cavallo_di_troia 3
+	call _c_readse_ln
+	addl $16, %esp
+	carica_registri
+	iret
+
+	.extern _c_writese_n
+a_writese_n:
+	salva_registri
+	copia_param 3 7
+	cavallo_di_troia 1
+	cavallo_di_troia2 1 2
+	call _c_writese_n
+	addl $12, %esp
+	carica_registri
+	iret
+
+	.extern _c_writese_0	// non _c_writese_ln, che va lo stesso
+a_writese_0:
+	salva_registri
+	copia_param 3 7
+	cavallo_di_troia 1
+	cavallo_di_troia 2
+	cavallo_di_troia3 1 2
+	call _c_writese_0
+	addl $12, %esp
+	carica_registri
+	iret
+
+	.extern _c_readconsole
+a_readconsole:
+	salva_registri
+	copia_param 2 7
+	cavallo_di_troia 0
+	cavallo_di_troia 1
+	cavallo_di_troia3 0 1
+	call _c_readconsole
+	addl $8, %esp
+	carica_registri
+	iret
+
+	.global a_vkbd_read
+	.extern _c_vkbd_read	
+a_vkbd_read:
+	salva_reg_rit
+	copia_param 1 6
+	call _c_vkbd_read
+	addl $4, %esp
+	carica_reg_rit
+	iret
+
+	.global a_vkbd_intr_enable
+	.extern _c_vkbd_intr_enable
+a_vkbd_intr_enable:
+	salva_registri
+	copia_param 2 7
+	call _c_vkbd_intr_enable
+	addl $8, %esp
+	carica_registri
+	iret
+
+	.extern _c_writeconsole
+a_writeconsole:
+	salva_registri
+	copia_param 1 7
+	cavallo_di_troia 0
+	call _c_writeconsole
+	addl $4, %esp
+	carica_registri
+	iret
+
+	.global a_vkbd_switch
+	.extern _c_vkbd_switch
+a_vkbd_switch:
+	salva_registri
+	copia_param 1 7
+	call _c_vkbd_switch
+	addl $4, %esp
+	carica_registri
+	iret
+
+	.global a_vkbd_wfi
+	.extern _c_vkbd_wfi
+a_vkbd_wfi:
+	salva_registri
+	copia_param 1 7
+	call _c_vkbd_wfi
+	addl $4, %esp
+	carica_registri
+	iret
+
+	.global a_vmon_switch
+	.extern _c_vmon_switch
+a_vmon_switch:
+	salva_registri
+	copia_param 1 7
+	call _c_vmon_switch
+	addl $4, %esp
+	carica_registri
+	iret
+
+	.global a_vmon_write_n
+	.extern _c_vmon_write_n
+a_vmon_write_n:
+	salva_registri
+	copia_param 4 7
+	call _c_vmon_write_n
+	addl $16, %esp
+	carica_registri
+	iret
+
+	.extern _c_iniconsole
+a_iniconsole:
+	salva_registri
+	copia_param 1 7
+	call _c_iniconsole
+	addl $4, %esp
+	carica_registri
+	iret
+
+	.global a_vmon_setcursor
+	.extern _c_vmon_setcursor
+a_vmon_setcursor:
+	salva_registri
+	copia_param 2 7
+	call _c_vmon_setcursor
+	addl $8, %esp
+	carica_registri
+	iret
+
+	.global a_vmon_getsize
+	.extern _c_vmon_getsize
+a_vmon_getsize:
+	salva_reg_rit
+	copia_param 3 6
+	call _c_vmon_getsize
+	addl $12, %esp
+	carica_reg_rit
+	iret
+
+	.global a_vkbd_leds
+	.extern _c_vkbd_leds
+a_vkbd_leds:
+	salva_registri
+	copia_param 3 7
+	call _c_vkbd_leds
+	addl $12, %esp
+	carica_registri
+	iret
+
+	.global a_vmon_cursorshape
+	.extern _c_vmon_cursorshape
+a_vmon_cursor_shape:
+	salva_reg_rit
+	copia_param 2 6
+	call _c_vmon_cursor_shape
+	addl $8, %esp
+	carica_reg_rit
+	iret
+
+	.global a_vkbd_send
+	.extern _c_vkbd_send
+a_vkbd_send:
+	salva_registri
+	copia_param 3 7
+	call _c_vkbd_send
+	addl $12, %esp
+	carica_registri
+	iret
+
+#if 0
+	.extern _ak4531_setMixer
+a_ak4531_set:
+	salva_registri
+	copia_param 3 7
+	call _ak4531_setMixer
+	addl $12, %esp
+	carica_registri
+	iret
+
+
+	.extern _ak4531_getMixer
+a_ak4531_get:
+	salva_registri
+	copia_param 3 7
+	call _ak4531_getMixer
+	addl $12, %esp
+	carica_registri
+	iret	
+#endif 
+
+	.extern _es1370_play
+a_es1370_play:
+	salva_registri
+	copia_param 5 7
+	call _c_es1370_play
+	addl $20, %esp
+	carica_registri
+	iret	
+	
+	.extern _es1370_sndcmd
+a_es1370_sndcmd:
+	salva_registri
+	copia_param 2 7
+	call _c_es1370_sndcmd
+	addl $8, %esp
+	carica_registri
+	iret
+	
+	.global _get_partizione
+	// MIO
+_get_partizione :
+	int $tipo_get_part 
+	ret
+
+	.global _read_part_n
+_read_part_n :
+	int $tipo_read_part_n
+	ret
+
+	.global _write_part_n
+_write_part_n :
+	int $tipo_write_part_n
+	ret 
+
+
+	.global a_get_time
+	.extern _c_get_time
+a_get_time :
+	salva_reg_rit
+	call _c_get_time
+	carica_reg_rit
+	iret
+
+	.global a_get_date
+	.extern _c_get_date
+a_get_date :
+ 	salva_reg_rit
+	call _c_get_date
+	carica_reg_rit
+	iret
+
+	 
+
+// SYSTEM CALL FS 
+	.extern _c_open 
+a_open	: 
+	salva_reg_rit
+	copia_param 2 6
+	call _c_open
+	addl $8, %esp
+	carica_reg_rit
+	iret 
+
+	.extern _c_close
+a_close	: 
+	salva_reg_rit
+	copia_param 1 6
+	call _c_close
+	addl $4, %esp
+	carica_reg_rit
+	iret 
+
+
+	.extern _c_write 
+a_write: 
+	salva_reg_rit
+	copia_param 3 6
+	cavallo_di_troia 1
+	cavallo_di_troia2 1 2
+	call _c_write
+	addl $12, %esp
+	carica_reg_rit
+	iret 
+
+	.extern _c_read 
+a_read: 
+	salva_reg_rit
+	copia_param 3 6
+	cavallo_di_troia 1
+	cavallo_di_troia2 1 2
+	call _c_read
+	addl $12, %esp
+	carica_reg_rit
+	iret 
+	
+	.extern _c_lseek
+a_lseek: 
+	salva_reg_rit
+	copia_param 3 6
+	call _c_lseek
+	addl $12, %esp
+	carica_reg_rit
+	iret 
+      
+      	.extern _c_chdir
+a_chdir: 
+	salva_reg_rit
+	copia_param 1 6
+	cavallo_di_troia 0
+	call _c_chdir
+	addl $4, %esp
+	carica_reg_rit
+	iret 
+
+	.extern _c_remove
+a_remove: 
+	salva_reg_rit
+	copia_param 1 6
+	cavallo_di_troia 0
+	call _c_remove
+	addl $4, %esp
+	carica_reg_rit
+	iret 
+	
+	.extern _c_rename
+a_rename: 
+	salva_reg_rit
+	copia_param 2 6
+	call _c_rename
+	addl $8, %esp 
+	carica_reg_rit 
+	iret 
+
+	.extern _c_rmdir
+a_rmdir: 
+	salva_reg_rit
+	copia_param 1 6
+	cavallo_di_troia 0
+	call _c_rmdir
+	addl $4, %esp
+	carica_reg_rit
+	iret 
+
+	.extern _c_mkdir
+a_mkdir: 
+	salva_reg_rit
+	copia_param 1 6
+	cavallo_di_troia 0
+	call _c_mkdir
+	addl $4, %esp
+	carica_reg_rit
+	iret 
+
+	.extern _c_getcwd
+a_get_cwd: 
+	salva_reg_rit
+	copia_param 2 6
+	cavallo_di_troia 0
+	call _c_getcwd
+	addl $8, %esp
+	carica_reg_rit
+	iret 
+
+	.extern _c_get_error
+a_get_error: 
+      salva_registri
+      copia_param 3 7
+      cavallo_di_troia 1
+      call _c_get_error
+      addl $12, %esp
+      carica_registri
+      iret 

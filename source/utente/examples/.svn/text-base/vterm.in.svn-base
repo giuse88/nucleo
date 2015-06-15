@@ -1,0 +1,40 @@
+/* programma che mostra le funzioni di editing multilinea dei terminali virtuali */
+#include <sys.h>
+#include <lib.h>
+
+process proc_pa_1 body pa(2), 10, LIV_UTENTE;
+
+#define BUFSIZE 1024
+char a_buf[BUFSIZE];
+char b_buf[BUFSIZE];
+
+vterm_edit_status stat = { 0, 0 };
+
+process_body pa(int a)
+{
+	for (;;) {
+		vterm_setcolor(a, COL_RED, COL_BLACK);
+		printf(a, "Inserisci testo (ctrl+D per terminare)\n");
+		vterm_setcolor(a, COL_WHITE, COL_BLACK);
+		int letti = readvterm_n(a, a_buf, BUFSIZE, &stat);
+		vterm_setcolor(a, COL_RED, COL_BLACK);
+		printf(a, "\nLetti %d caratteri\n", letti);
+		natl vterm;
+		for (;;) {
+			printf(a, "A quale terminale inviare (4 per uscire)? ");
+			readvterm_ln(a, b_buf, BUFSIZE);
+			vterm = b_buf[0] - '0';
+			if (vterm >= 0 && vterm <= 4)
+				break;
+			printf(a, "terminale '%s' non valido\n", b_buf);
+		}
+		if (vterm == 4)
+			break;
+		printf(a, "Invio al terminale %d\n", vterm);
+		if (vterm == 0)
+			writeconsole(a_buf);
+		else
+			writevterm_n(vterm, a_buf, letti);
+	}
+	printf(a, "bye\n");
+}

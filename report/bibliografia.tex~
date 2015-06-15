@@ -1,0 +1,12 @@
+\begin{thebibliography}{100}
+\bibitem{Sistemi Operativi} \emph {Sistemi Operativi} Concetti ed esempi \\ A.Silberschartz-P.B Galvin -G. Gagne 
+\bibitem{Architettura dei Calcolatori Volume I} \emph{Architettura dei Calcolatori Volume I} \\ Graziano Frosini Giuseppe Lettieri
+\bibitem{Architettura dei Calcolatori Volume I} \emph{Architettura dei Calcolatori Volume II} \\ Graziano Frosini Giuseppe Lettieri
+\bibitem{Architettura dei Calcolatori Volume I} \emph{Architettura dei Calcolatori Volume III} \\ Graziano Frosini Giuseppe Lettieri
+\bibitem{Fat} Microsoft \emph{FAT spefiche generiche} \\ \url {http://msdn.microsoft.com/it-it/windows/hardware/gg463084}
+\bibitem{Long Name} Microsoft \emph{Specifche gestione nomi FAT32} \\ \url {www.osdever.net/documents/LongFileName.pdf}
+\bibitem{FatDev} Os-dev Fat \\ \url {http://wiki.osdev.org/FAT}
+\bibitem{CMOS} Os-dev CMOS \\ \url {http://wiki.osdev.org/CMOS}
+\bibitem{RTC} Os-dev RTC \\ \url {http://wiki.osdev.org/RTC}
+\end{thebibliography}
+\clearpage{\pagestyle{empty}\cleardoublepage}

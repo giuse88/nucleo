@@ -1,0 +1,7 @@
+\begin{thebibliography}{100}
+\bibitem{Fat} Microsoft \emph{FAT spefiche generiche} \\ \url {http://msdn.microsoft.com/it-it/windows/hardware/gg463084}
+\bibitem{Long Name} Microsoft \emph{Specifche gestione nomi FAT32} \\ \url {www.osdever.net/documents/LongFileName.pdf}
+\bibitem{Sistemi Operativi} \emph {Sistemi Operativi} Concetti ed esempi \\ A.Silberschartz-P.B Galvin -G. Gagne 
+\bibitem{Architettura dei Calcolatori Volume I} \emph{Architettura dei Calcolatori Volume I} Graziano Frosini Giuseppe Lettieri
+\end{thebibliography}
+\clearpage{\pagestyle{empty}\cleardoublepage}

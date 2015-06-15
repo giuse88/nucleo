@@ -1,0 +1,110 @@
+#ifndef  _DIR_ENTRY_
+#define _DIR_ENTRY_
+ 
+#include "type.h" 
+#include "fs.h" 
+
+
+typedef struct _SHORT_ENTRY_{ 
+  byte DIR_Name[11]; // nome corto 
+  byte DIR_Attr;     // attributi 
+  byte DIR_NTRes;    // riservato per windows nt
+  byte DIR_CrtTimeTenth; // vedi specifiche 
+
+  word DIR_CrtTime ;  // ora di creazione 
+  word DIR_CrtDate; // data di creazione 
+  word DIR_LstAccDate; // Ultimo accesso
+
+  word DIR_FstClusHI; // parte alta indirizzo clusterFAT32 
+
+  word DIR_WrtTime ;  // ora di scrittura 
+  word DIR_WrtDate; // data discrittura
+  word DIR_FstClusLO; // Parte bassa dell'indirizzo   
+
+  dword DIR_FileSize; // grandezza del file in byte 
+
+} __attribute__((packed))SHORT_ENTRY;  
+
+
+//typedef struct _LONG_ENTRY_FAT LONG_ENTRY_FAT;
+
+typedef struct _LONG_ENTRY_FAT_ { 
+  byte    LDIR_Ord;     // Ordine delle entrate 
+  word    LDIR_Name1[5];   // 1-5  
+  byte    LDIR_Attr;    // attributo ( directory lunga)
+  byte    LDIR_Type;    // e 
+
+  byte  LDIR_Chksum ;       // Checksum, 
+  word LDIR_Name2[6];     // data di creazione 
+  word LDIR_FstClusLO;   // Deve essere zero
+  word LDIR_Name3[2];     //  
+
+  //  LONG_ENTRY_FAT * next_long_entry;  // prossima tabella  
+
+}__attribute__((packed))LONG_ENTRY;  
+
+
+
+struct _msdos_date_  { 
+ unsigned  Day :5; 
+ unsigned Month:4; 
+ unsigned Years:7; 
+}__attribute__((packed));
+
+typedef struct _msdos_date_ msdos_date; 
+
+struct _msdos_time_ { 
+  unsigned Second:5;
+  unsigned Minutes:5; 
+  unsigned Hours:6; 
+}__attribute__((packed));
+  
+typedef struct  _msdos_time_ msdos_time; 
+
+
+
+
+/*ENTRY DIR */ 
+
+#define FREE             0xE5                //direcotory libera
+#define ALL_FREE    	 0x00                // finite le direcotry 
+
+#define ATTR_READ_ONLY 	 0x01 
+#define ATTR_HIDDEN      0x02 
+#define ATTR_SYSTEM      0x04 
+#define ATTR_VOLUME_ID   0x08
+#define ATTR_DIRECTORY   0x10 
+#define ATTR_ARCHIVE     0x20 
+#define ATTR_LONG_NAME     (ATTR_READ_ONLY  | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID)
+#define ATTR_LONG_NAME_MASK   (ATTR_READ_ONLY  | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID | ATTR_DIRECTORY | ATTR_ARCHIVE)
+
+#define MASK_LAST_NAME 0x40
+#define PADDING 0xFFFF
+#define SIZE_NAME_PART 13
+#define SIZE_NAME 260
+#define SIZE_BUF 1024
+#define SIZE_ENTRY 32
+#define SIZE_NAME_SHORT 11 
+#define MAX_NAME 260
+
+#define SIZE_UNO 5
+#define SIZE_DUE 6
+#define SIZE_TRE 2
+
+#define DELETED_FLAG 0xE5
+#define MSDOS_NAME 11 
+
+
+void print_directory ( byte label, dword chain );
+void test_dir (byte label); 
+
+
+// crea un entry sulla cartella father e salva sul contenuto su new che viene creato
+BOOL create_entry(const char * name , byte type,  const FCB * father, FCB ** new);  
+// crea new e carica i valori della direntry cercata
+BOOL open_entry(const char * name , const FCB * father, FCB ** new);  
+//elimina direnetry
+BOOL delete_entry( const FCB *);  
+
+
+#endif

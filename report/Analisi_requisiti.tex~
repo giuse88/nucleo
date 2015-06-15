@@ -1,0 +1,209 @@
+\chapter{Analisi e specifica dei requisiti}
+\label{cap:Requisiti}
+In questo capitolo presentiamo la fase di \textit{analisi e specifica dei requisiti}. I requisiti descrivo ciò che l'utente si aspetta dal sistema, e specificarli significa esprimerli in modo chiaro, univoco, e consistente con il problema, che si sta trattando.\\
+La scopo principale del processo di Analisi e specifica dei requisisti consiste nella comprensione del problema dell'utente. E' un processo di fondamentale importanza in quanto da questo dipendono gli sviluppi delle fasi di progettazione successive. Questo processo può essere suddiviso in sotto-fasi distinte 
+\begin{description}
+\item[Analisi del dominio]
+    La prima sotto-fase consiste nell'analisi del dominio, nella quale si studia l'ambiente nel quale il sistema dovrà operare.                                                                                                               \end{description}
+\begin{description}
+\item [Analisi e specifica dei requisiti utente]
+ Nella sotto-fase di Analisi e specifica dei requisiti utente si descrivano prima in termini generali (analisi), poi in termini più dettagliati (specifica), tutte le aspettative che l'utente ha nei riguardi del sistema.                                                                                                                                                                                                                                      \end{description}
+
+\begin{description}
+\item[Specifiche dei requisiti Software]
+ Partendo dai risultati della fase di analisi e specifica dei requisiti utente si passa alla sotto-fase delle specifiche software nelle quali si spiega come il software soddisfa le aspettative dell'utente'.                                                                                                                                                                                                         \end{description}
+Infine nell'ultima parte del capitolo introduciamo alcuni esempi di casi d'uso che forniscono un esempio schematico del comportamento del sistema da parte dell'utente.
+\section{Analisi Dominio}
+Il nostro sistema è un file system sviluppato per il nucleo didattico del Prof. Frosini e Prof. Lettieri , più precisamente il file system verrà inserito nella versione SVN 568.
+Il nucleo è diviso in tre moduli distinti, sia logicamente che in fase di liking.
+\begin{description}
+ \item[Modulo Sistema]
+ Il modulo sistema è il modulo nel quale si inizializza il sistema, vengono inizializzati la memoria virtuale e i processi. 
+ \end{description}
+ \begin{description}
+  \item[Modulo IO]
+ Il modulo IO è il modulo nel quale vengono gestite le periferiche di input ed output, è in esecuzione con i privilegi Sistema 
+  \end{description}
+  \begin{description}
+   \item[Modulo Utente]
+  IL modulo utenteè il modulo che gestisce i programmi utente, questo modulo va in esecuzione con i privilegi utente 
+   \end{description}
+Il file system è stato inserito nel modulo di IO perché è un componente del nucleo che necessità  di usufruire di particolari istruzioni o strutture dati accessibili solo da livello sistema, necessita di poter sfruttare tutte le potenzialità della memoria virtuale necessaria per maneggiare le grandi strutture dati di cui è composto e infine sono necessarie alcune primitive bloccanti non usabili a livello sistema.\\
+Il file system è un componente complesso del modulo IO, per far fronte a tutte le esigenze di questo componente è stato necessario introdurre alcune modifiche e nuove funzionalità ai moduli di sistema e IO.
+ \subsection{Modifiche modulo Sistema}
+ Il modulo sistema è il modulo principale del nucleo. Questo modulo viene caricato dal boot loader ed esegue l'inizializzazione delle principali caratteristiche del nucleo, quali la gestione dei processi e la gestione della memoria virtuale e la gestione dei semafori e poi carica i restanti moduli. 
+ Le modifiche introdotte su questo modulo riguardano principalmente due aspetti, la gestione dell'hard disk e l'introduzione di una area riservata per ogni processo. 
+ \subsubsection{Hard Disk}
+ Il driver dell'hard disk è in inserito nel modulo sistema, poiché è necessario per una corretta gestione dell'area di swap. Le modifiche introdotte riguardano la gestione dei volumi di un disco che era assente.Le primitive presenti supportano le operazioni di scrittura e lettura sul disco ma senza aver coscienza del volume sul quale si sta lavorando.
+ Per un corretto funzionamento del filesystem è stato necessario introdurre delle primitive accessibili solamente a livello sistema che mi permettessero di identificare quali volumi sono presenti sul disco ed effettuare operazioni di lettura e scrittura su questi. 
+  \begin{description}
+   \item[get\_partizione]
+   E' una primitiva a livello sistema che mi permette di accedere alla lista delle partizioni presente nella memoria del modulo sistema altrimenti inaccessibile dal modulo IO in quanto  
+   non collegati tra di loro. Questa primitiva riporta un indice univoco mediante il quel è possibile riferire la partizione all'interno del disco.
+   \end{description}
+  \begin{description}
+   \item[write\_part\_n]
+    Primitiva a livello sistema che mi permette di eseguire le operazioni di scrittura sulle varie partizioni presenti sul disco.
+    Per poter identificare la partizione in modo univoco, associate alle informazioni attinenti il canale ATA e il DRIVER si deve indicare anche l'indice
+    ottenuto dalla primitiva get\_partizione
+  \end{description}
+   \begin{description}
+   \item[read\_part\_n]
+    Primitiva a livello sistema che mi permette di eseguire le operazioni lettura sulle varie partizioni presenti sul disco.
+    Per poter identificare la partizione in modo univoco associate alle informazioni attinenti il canale ATA e il DRIVER si deve indicare anche l'indice
+    ottenuto dalla primitiva get\_partizione
+  \end{description}
+  \subsubsection{Area privata processo}
+  Il file system per poter gestire correttamente i file e le directory ha la necessità di associare delle informazioni private ad ogni processo. Il nucleo non supportava questa possibilità, quindi è stato necessario introdurre un meccanismo che mi permettesse di gestire quest'area privata dallo spazio IO.\\
+  La prima modifica introdotta riguarda il descrittore di processo nel quale sono stati introdotti dei campi aggiuntivi che mi permettessero di associare e gestire l'area privata di ogni processo.
+ \begin{code}
+      natl  p_id; 	     // id del processo padre
+      void* iostate;         // puntatore area riservata IO state 
+      natl  iostate_size;   // grandezza area riservata 
+  \end{code}
+  La prima questione da affrontare, una volta inserite queste modifiche è come e con quali valori l'area deve essere inizializzata. L'area privata di un processo viene inizializzata durante la creazione del processo copiando i valori contenuti nell'area del processo padre, se questa è presente. Se l'area del processo padre non è presente, si copiano i valori di default contenuti nell'area  di memoria globale inserita nel modulo sistema ed individuata dal puntatore \textit{io\_global\_info}, se è stata inizializzata. Se non è presente nessun area globale, l'area privata del processo non viene inizializzata.
+  Per inizializzare in fase di creazione ho modificato la crea\_processo nel seguente modo. 
+  
+ \begin{lstlisting}
+	pdes_proc->p_id = esecuzione->id;
+ 	father_proc=des_p(esecuzione->id); // prelevo il puntatore al descrittore di processo del padre
+	
+	// non puo esistere la condizione nella quale le informazioni globali non sono inizzializate 
+	// mentre quelle del padre si, il contrario invece puo capitare ( processo main ) 
+ 	if(io_global_info && io_global_size && father_proc->iostate && father_proc->iostate_size ) { 
+ 	    // copio le informazioni del padre 
+  	    natl size=father_proc->iostate_size; 
+  	    pdes_proc->iostate_size=size; 
+  	    pdes_proc->iostate=alloca(size, 1); 
+  	    if (!pdes_proc->iostate) goto errore6; 
+  	    memset(pdes_proc->iostate, 0, size); 
+  	    memcpy( pdes_proc->iostate,father_proc->iostate,size); 
+   
+ 	}else if (io_global_info && io_global_size) { 
+	   // se il padre non ha informazioni copio quelle globali 
+	    pdes_proc->iostate_size=io_global_size; 
+ 	    pdes_proc->iostate=alloca(io_global_size, 1); 
+ 	    if (!pdes_proc->iostate) goto errore6; 
+ 	    memset(pdes_proc->iostate, 0, io_global_size); 
+ 	    memcpy( pdes_proc->iostate,io_global_info,io_global_size); 
+	   
+	} else {
+	  //azzero le informazioni riguardanti l'area IO
+	    pdes_proc->iostate=NULL; 
+	    pdes_proc->iostate_size=0; 
+	}
+   }
+  
+\end{lstlisting}
+  Questa area però deve anche essere dealocata, questo compito viene eseguito all'interno della \textit{distruggi\_processo}.\\
+  Poiché l'area privata è stata inserita nello spazio di indirizzamento di sistema, per il file system e qualunque altro componente del modulo IO è impossibile accedere alle informazioni presenti nei descrittori di processo, e di conseguenza all'area privata.\\ 
+  Per gestire quest'area in modo corretto ho inserito le seguenti primitive accessibili solo da livello sistema : 
+  \begin{description}
+   \item[c\_io\_space\_init]
+    Primitiva che inizializza l'area globale presente nel modulo sistema. Questa primitiva alloca lo spazio necessario per inserire i valori ricevuti come parametri. 
+  \end{description}
+  \begin{description}
+   \item[c\_io\_space\_read]
+   Primitiva che mi permette di leggere dei valori nell'area privata di un processo, specificando un offset di interesse.
+  \end{description}
+    \begin{description}
+   \item[c\_io\_space\_write]
+   Primitiva che mi permette di scrivere dei valori nell'area privata di un processo, specificando un offset di interesse.
+  \end{description}
+
+  
+ \subsection{Modifiche modulo IO}
+ Nel modulo IO, e il modulo nel quale è inserito il file system che verrà discusso ampiamente nei prossimi capitoli, in questo paragrafo mi limito a mostrare le modifiche introdotte nel modulo IO non facenti parte del file system. \\
+ Nel modulo IO le principali modifiche che ho introdotte sono, l'introduzione di un sistema per la gestione dell'ora e della data, l'introduzione di una semplice gestore degli errori e l'introduzione di  alcune librerie.
+ \subsubsection{Data e ora}
+ Il nucleo non possiede nessun meccanismo per ottenere ne l'ora corrente, ne la data corrente. Ogni computer è munito di un sistema per mantenere la data e l'ora dopo lo spegnimento del computer, questo sistema e formato da una memoria CMOS e da un RTC accessibili mediante delle porte di IO. Per usare questo dispositivo ho scritto un piccolo driver gestito a controllo di programma che mi permettesse di leggere la data e l'ora contenute nei suoi registri e operasse le opportune conversioni sui valori letti fornendomi un interfaccia semplice ed omogenea.
+ Per usufruire di questo meccanismo ho inserito due primitive accessibili anche da livello utente : 
+ \begin{description}
+  \item[get\_time]
+    Primitiva di livello utente che riporta l'ora corrente. L'ora corrente viene restituita in un formato compatto, di grandezza pari a 4 byte, ogni byte assume un significato particolare. 
+    \begin{itemize}
+     \item Byte 0: Contiene il valore del secondo corrente espresso in formato binario. Range [0-59]. 
+    \end{itemize}
+    \begin{itemize}
+     \item Byte 1: Contiene il valore del minuto espresso in formato binario. Range [0-59].  
+    \end{itemize}
+    \begin{itemize}
+     \item Byte 2: Contiene il valore dell'ora corrente espresso in formato binario.Range [0-23].
+    \end{itemize}
+    \begin{itemize}
+     \item Byte 3: Byte inutilizzato a disposizione.
+    \end{itemize}
+  \end{description}
+  
+  \ \begin{description}
+  \item[get\_data]
+    Primitiva di livello utente che riporta la data corrente. La data corrente viene restituita in un formato compatto, di grandezza pari a 4 byte, ogni byte assume un significato particolare. 
+    \begin{itemize}
+     \item Byte 0: Contiene il valore del giorno corrente espresso in formato binario. Range [1-31].   
+    \end{itemize}
+    \begin{itemize}
+     \item Byte 1: Contiene il valore del mese corrente  espresso in formato binario. Range [1-12].
+    \end{itemize}
+    \begin{itemize}
+     \item Byte 2: Contiene il valore dell'anno corrente espresso in formato binario. Range [0-99].
+    \end{itemize}
+    \begin{itemize}
+     \item Byte 3: Byte inutilizzato a disposizione.
+    \end{itemize}
+  \end{description}
+ \subsubsection {Librerie}
+  \label{lib}
+  Data la grandezza del progetto è stato necessario implementare delle librerie più meno standard che utilizzo in quasi tutti i moduli. 
+  Le librerie introdotte vengono linkate al modulo IO, quindi sono disponibli per tutto il sistema IO.
+  
+  \begin{description}
+    \item[string.h]
+    Libreria standard C, dove sono presenti le principali funzioni per la gestione delle stringhe.
+  \end{description}
+  
+  
+  \begin{description}
+    \item[strarg.h]
+    Libreria standard C, sono presenti le macro e le funzioni per la getsione degli argomenti delle funzioni.
+  \end{description}
+  
+  
+  \begin{description}
+    \item[wchar.h]
+    Libreria standard C, dove sono presenti le principali funzioni per la gestione delle stringhe in formato wchar.
+  \end{description}
+  
+  \begin{description}
+    \item[error.h]
+    Libreria standard C, piccola libreria che permette di gestire in modo molto semplice gli errori a livello sistema.
+  \end{description}
+  
+ \subsubsection{Gestione errori}
+    Sempre a causa della grandezza del progetto, è stato neccessario introddure una semplice gestione degli errori, realizata dalla libreria errno.h. 
+    Questa gestione viene realizata principlaemente mediante delle funzioni che agiscono su delle varibili globali che contengono lo stato attuale.  
+     \begin{itemize}
+      \item \textbf{errno} : word che contiene un codice identifgicativo per l'errore che si è verificato. 
+     \end{itemize}
+     
+    \begin{itemize}
+     \item \textbf{str\_errno} : stringa che contiene la spiegazione dell'errore contenuto in errno. 
+    \end{itemize}
+
+    Queste variabili devono essere modificate mediante le seguenti funzioni, e anche se è possibile accederci diretamente conviene usare le funzioni.\\
+
+      \begin{description}
+       \item[perror]
+	    Funzione che stampa la stringa di errore accodata alla stringa passata come argomento
+       \end{description}
+
+  \begin{description}
+   \item[set\_errno] 
+	    Funzione che setta le variabili di errore globali ai valori specificati come argomento.
+   \end{description}
+    
+   \begin{description}
+    \item[reset\_errno]
+	Funzione che resetta le variabili di errore, inserendo il valore di default (successo).  
+   \end{description}
+
+\clearpage{\pagestyle{empty}\cleardoublepage}

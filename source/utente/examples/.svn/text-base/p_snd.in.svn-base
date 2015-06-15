@@ -1,0 +1,175 @@
+#include <sys.h>
+#include <lib.h>
+#include <colors.h>
+#include "es1370.h"
+
+extern "C" void getMixer(natb &err, natb &value, natb port);
+extern "C" void setMixer(natb &err, natb port, natb value);
+/*
+natb vol2bit_00_0E(int vol){
+	natb bit;	
+	if(vol<=0)
+		return 0x80;
+	if(vol>100)
+		vol=100;	
+
+	double quota = 100/33;
+	int tosub = 100 - vol;
+	int value = tosub / quota;	
+	value = value & 0x0000001F;
+	bit = natb(value);
+	return bit;
+}
+
+natb vol2bit_0F(int vol){
+	natb bit;	
+	if(vol<=0)
+		return 0x80;
+	if(vol>100)
+		vol=100;
+			
+	double quota = 100/9;
+	int tosub = 100 - vol;
+	int value = tosub / quota;	
+	value = value & 0x00000007;
+	bit= natb(value) & 0x7F;
+	return bit;	
+}
+
+int bit2vol_00_0E(natb bit){
+	int vol;	
+	if(bit & 0x80)
+		return 0;
+		
+		
+	double quota = 100/32;
+	
+	natb tosub = 0x20 - bit;
+	vol = int(tosub * quota);	
+	return vol;	
+}
+int bit2vol_0F(natb bit){
+	int vol;	
+	if(bit & 0x80)
+		return 0;
+		
+		
+	double quota = 100/9;
+	
+	natb tosub = 0x08 - bit;
+	vol = int(tosub * quota);	
+	return vol;	
+}
+*/
+/*
+process __prova body __provaaudio(2), 201, LIV_UTENTE;
+
+process_body __provaaudio(int a)
+{
+	natb dato;
+	natb err;
+	printf(a, "Inizio prova audio\n");
+
+
+///// PROVA LETTURA	
+	printf(a, "Leggiamo tutti i registri (ma proprio tutti)\n");		
+	for(natb i=AK4531_LMASTER; i<=AK4531_MIC; i++){
+		err=0; dato=0;
+		printf(a, "Registro\t%x\n\t", i);
+		getMixer(err, dato, i);
+		if(err==0xFF)
+			printf(a, "Errore nella lettura del registro %x\n", i);		
+		else{
+			printf(a, "valore\t%x \n\n", dato);				
+		}	
+//delay(40);	
+	}
+	
+	getMixer(err, dato, AK4531_MONO_OUT);
+		if(err==0xFF)
+			printf(a, "Errore nella lettura del registro %x\n", AK4531_MONO_OUT);		
+		else{
+			printf(a, "Registro\t%x \n\tvalore\t%x \n\n", AK4531_MONO_OUT, dato);
+		}
+//delay(200);	
+	for(natb i=AK4531_RESET; i<=AK4531_CLOCK; i++){
+		getMixer(err, dato, i);
+		if(err==0xFF)
+			printf(a, "Errore nella lettura del registro %x\n", i);		
+		else{
+			printf(a, "Registro\t%x \n\tvalore\t%x \n\n", i, dato);				
+		}	
+//delay(40);	
+	}
+	
+//delay(40);	
+
+/// PROVA SCRITTURA		
+	printf(a, "\n\nSettiamo tutti i registri a un valore di volume a meta'\n");	
+	printf(a, "Poi proviamo a settare clock e reset\n");		
+	printf(a, "Dobbiamo ricevere errore\n");	
+	dato=0x10;
+	for(natb i=AK4531_LMASTER; i<=AK4531_MIC; i++){
+		setMixer(err, i, dato);
+		if(err==0xFF)
+			printf(a, "Errore nella scrittura del registro %x\n", i);		
+		else{
+			printf(a, "Registro\t%x \n\tNessun errore in scrittura\n\n", i);				
+		}
+delay(40);			
+	}
+
+
+	dato=0x04;
+	setMixer(err, AK4531_MONO_OUT, dato);
+	if(err==0xFF)
+		printf(a, "Errore nella scrittura del registro %x\n", AK4531_MONO_OUT);		
+	else{
+		printf(a, "Registro\t%x \n\tNessun errore in scrittura\n\n", AK4531_MONO_OUT);				
+	}
+//delay(40);		
+	for(natb i=AK4531_RESET; i<=AK4531_CLOCK; i++){
+		setMixer(err, i, 0x03);
+		if(err==0xFF)
+			printf(a, "Errore nella scrittura del registro %x\n", i);		
+		else{
+			printf(a, "Registro\t%x \n\tNessun errore in scrittura\n\n", i);				
+		}
+//delay(40);	
+	}
+delay(40);	
+
+
+/// PROVA NUOVA LETTURA
+	printf(a, "Leggiamo (nuovamente) tutti i registri (ma proprio tutti)\n");		
+	for(natb i=AK4531_LMASTER; i<=AK4531_MIC; i++){
+		getMixer(err, dato, i);
+		if(err==0xFF)
+			printf(a, "Errore nella lettura del registro %x\n", i);		
+		else{
+			printf(a, "Registro\t%x \n\tvalore\t%x \n\n", i, dato);				
+		}	
+delay(40);			
+	}
+	
+	getMixer(err, dato, AK4531_MONO_OUT);
+		if(err==0xFF)
+			printf(a, "Errore nella lettura del registro %x\n", AK4531_MONO_OUT);		
+		else{
+			printf(a, "Registro\t%x \n\tvalore\t%x \n\n", AK4531_MONO_OUT, dato);				
+		}	
+delay(40);			
+	for(natb i=AK4531_OUT_SW1; i<=AK4531_MIC_GAIN; i++){
+		getMixer(err, dato, i);
+		if(err==0xFF)
+			printf(a, "Errore nella lettura del registro %x\n", i);		
+		else{
+			printf(a, "Registro\t%x \n\tvalore\t%x \n\n", i, dato);				
+delay(40);	
+		}	
+	}
+
+	printf(a, "Prova finita\n");
+}
+
+*/

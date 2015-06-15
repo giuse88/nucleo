@@ -1,0 +1,13 @@
+#include <sys.h>
+#include <lib.h>
+
+process proc_timer body body_timer(1), 10, LIV_UTENTE;
+
+process_body body_timer(int a)
+{
+	for (int i = 5; i > 0; i--) {
+		printf(a, "\rAttendo %d second%c...", i, (i > 1? 'i' : 'o'));
+		delay(100);
+	}
+	printf(a, "fine\n");
+}

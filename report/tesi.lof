@@ -1,0 +1,16 @@
+\select@language {italian}
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {2.1}{\ignorespaces File system stratificato}}{7}
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {3.1}{\ignorespaces Struttura Volume FAT}}{14}
+\contentsline {figure}{\numberline {3.2}{\ignorespaces Esempio di una catena FAT}}{20}
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {4.1}{\ignorespaces Diagramma Caso d'uso gestione File}}{25}
+\contentsline {figure}{\numberline {4.2}{\ignorespaces Diagramma Caso d'uso gestione Cartelle}}{25}
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {6.1}{\ignorespaces Struttura generale del sistema.}}{34}
+\contentsline {figure}{\numberline {6.2}{\ignorespaces Modulo Base}}{37}
+\contentsline {figure}{\numberline {6.3}{\ignorespaces Gestore File}}{40}
+\contentsline {figure}{\numberline {6.4}{\ignorespaces Modulo SystemCall}}{42}

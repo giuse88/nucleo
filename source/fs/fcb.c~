@@ -1,0 +1,194 @@
+#include "direntry.h" 
+#include "string.h" 
+#include "errno.h"
+#include "data.h"
+#include "fat.h" 
+#include "sistema.h"
+#include "wchar.h"
+#include "fs.h"
+#include "system_call.h" 
+#include "fcb.h" 
+			  
+// funzioni di utilità presenti su direntry.c 
+
+extern void split_dword (const dword value, word * low, word * high);
+extern void print_short_entry(SHORT_ENTRY * s);
+extern BOOL to_msdos_time ( dword sys_time, msdos_time *time );
+extern BOOL to_msdos_date ( dword sys_date, msdos_date *date );
+extern dword get_time(); 
+extern dword get_date(); 
+
+
+			  
+/*****************SCRITTURA LETTURA *************************/
+int read_fcb(FCB*file, void *buf, size_t count){
+  
+  SHORT_ENTRY short_entry; 
+  size_t eff_read=0; 
+  int ret=0, n_read=0; 
+  dword  offset=0; 
+  
+  if ( file == NULL  || buf==NULL || count <=0) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  if ( !file->volume ) { 
+    set_errno(EINVAL,"FCb errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  if (!(IS_READ(file->mode) || IS_RDWR(file->mode))) {
+    set_errno(EINVAL,"File non aperto in lettura"); 
+    return -EINVAL;
+  }
+
+  if (file->cluster == 0 ) {
+    reset_errno(); 
+    return 0;
+  }
+  
+
+  
+  memset(&short_entry, 0, sizeof(SHORT_ENTRY)); 
+  
+  if (file->n_entry !=0)  {
+  //offset della short entry 
+  offset=file->offset_father +((file->n_entry-1)*SIZE_ENTRY); 
+  // leggo le informazioni presenti nella short_entry
+  if ( (ret=read_data(file->volume, file->cluster_father,offset, (byte*)(&short_entry), sizeof(SHORT_ENTRY))) < 0 ) 
+      return ret; 
+  
+  }
+//  print_short_entry(&short_entry);
+  // sto eccedendo la grandezza del file
+  if ( ( file->pos_corr + count ) > file->size)	  
+	 eff_read=file->size-file->pos_corr; 
+  else 
+	 eff_read=count; 
+
+  flog(LOG_WARN, "Inizio lettura %d", eff_read); 
+            //scrivo il buffer 
+  if ( (n_read=read_data(file->volume,file->cluster, file->pos_corr, buf, eff_read)) < 0 ) {
+      perror("ERRORE read_data"); 
+      return n_read; 
+  }
+  //  flog(LOG_DEBUG, "Ciuapoidsafs"); 
+  // se più processi usano lo stesso file si possono formare incoerenze ma non danneggiamenti 
+      
+  // aggiorno la short_entry
+  to_msdos_date(get_date(), (msdos_date*) &(short_entry.DIR_LstAccDate)); 
+  //aggiorno la posizione corrente 
+  file->pos_corr+=n_read; 
+
+   if (file->n_entry !=0)  {
+     
+   if ( (ret=write_data(file->volume, file->cluster_father, offset, (byte*)&short_entry, sizeof(SHORT_ENTRY))) < 0 ) 
+      return ret; 
+  
+   }
+ //  flog(LOG_DEBUG, "Ciuapoidsafs %d", n_read); 
+   reset_errno(); 
+   return n_read; 
+  
+}
+
+// funzione che scrive buf sul file aggiornando le varie entri
+
+int  write_fcb(FCB*file, const void *buf, size_t count){
+
+  SHORT_ENTRY short_entry; 
+  int ret=0, n_write=0; 
+  dword new_chain=0, offset=0; 
+  
+  if ( file == NULL  || buf==NULL || count <0) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  if ( !file->volume) { 
+    set_errno(EINVAL,"FCb errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  if (!(IS_WRITE(file->mode) || IS_RDWR(file->mode))) {
+    set_errno(EINVAL,"File non aperto in scrittura %d", file->mode); 
+    return -EINVAL;
+  }
+  
+  if (file->type == ATTR_DIRECTORY ) {
+    set_errno(EISDIR,"Directory"); 
+    return -EINVAL;
+  }
+    
+  
+  memset(&short_entry, 0, sizeof(SHORT_ENTRY)); 
+  offset=file->offset_father +((file->n_entry-1)*SIZE_ENTRY); 
+  // leggo le informazioni presenti nella short_entry
+  if ( (ret=read_data(file->volume, file->cluster_father,offset, (byte*)(&short_entry), sizeof(SHORT_ENTRY))) < 0 ) 
+      return ret; 
+  
+  
+  if (!file->cluster) {	// se non è mai stato inizializzato
+      if (!create_fat(file->volume, &new_chain)) {
+	  flog(LOG_WARN, " Errore creazione CHAIN  %d",new_chain); 
+	  return -1; 
+      }else{
+	word low=0, high=0; 
+	file->cluster=new_chain;
+	split_dword(new_chain,&low,&high);
+	short_entry.DIR_FstClusLO=low; 
+	short_entry.DIR_FstClusHI=high; 
+       }
+  }   
+          //scrivo il buffer 
+  if ( (n_write=write_data(file->volume,file->cluster, file->pos_corr, buf, count)) < 0 ) {
+      perror("ERRORE write"); 
+      return n_write; 
+  }
+  
+  // se più processi usano lo stesso file si possono formare incoerenze ma non danneggiamenti 
+  to_msdos_date(get_date(), (msdos_date*) &short_entry.DIR_WrtDate); 
+  to_msdos_time(get_time(), (msdos_time*) &short_entry.DIR_WrtTime);
+  to_msdos_date(get_date(), (msdos_date*) &short_entry.DIR_LstAccDate); 
+  
+  //aggiorno la posizione corrente 
+  file->pos_corr+=n_write; 
+
+  //devo aggiornare solo se ho scritto qualcosa in più 
+  if(file->pos_corr > short_entry.DIR_FileSize) 
+	short_entry.DIR_FileSize+=(file->pos_corr-short_entry.DIR_FileSize); 
+  
+  file->size=short_entry.DIR_FileSize;
+
+   if ( (ret=write_data(file->volume, file->cluster_father, offset, (byte*)&short_entry, sizeof(SHORT_ENTRY))) < 0 ) 
+      return ret; 
+
+#ifndef DEBUG_FS 
+  flog(LOG_INFO, "Ho scritto %d", n_write); 
+  print_short_entry(&short_entry);
+#endif  
+   
+   reset_errno(); 
+   return n_write; 
+}   
+   
+  
+  
+
+
+void print_fcb ( const FCB * fcb ) {
+
+//     flog ( LOG_DEBUG, "Name       :%s", fcb->name );
+//     flog ( LOG_DEBUG, "Path       :%s", fcb->path); 
+    flog ( LOG_DEBUG, "Mode       :%x", fcb->mode); 
+    flog ( LOG_DEBUG, "Cluster    :%d", fcb->cluster );
+    flog ( LOG_DEBUG, "Volume     :%x", fcb->volume );
+    flog ( LOG_DEBUG, "Father clu :%d", fcb->cluster_father);
+    flog ( LOG_DEBUG, "Father off :%x", fcb->offset_father); 
+    flog ( LOG_DEBUG, "N entry    :%d", fcb->n_entry );
+    flog ( LOG_DEBUG, "Pos cor    :%d", fcb->pos_corr );
+    flog ( LOG_DEBUG, "Type       :%d", fcb->type);  
+    flog ( LOG_DEBUG, "Size       :%d", fcb->size );
+  
+}

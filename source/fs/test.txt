@@ -1,0 +1,6549 @@
+#ifndef _DATA_H
+#define _DATA_H
+
+
+#include "type.h"
+
+/*Interfaccia per la gestione della zona dati del disco */ 
+
+// funzione che scrive buf sul volume nella catena chain 
+int write_data(byte label , dword chain, size_t offset, const byte * buf, size_t size); 
+// funzione che legge buf dal volume label sulla catena chain 
+int read_data(byte label , dword chain, lword offset,  byte * buf, dword size); 
+
+BOOL test_read (byte  label);
+
+
+#endif#ifndef  _DIR_ENTRY_
+#define _DIR_ENTRY_
+ 
+#include "type.h" 
+#include "fs.h" 
+
+
+typedef struct _SHORT_ENTRY_{ 
+  byte DIR_Name[11]; // nome corto 
+  byte DIR_Attr;     // attributi 
+  byte DIR_NTRes;    // riservato per windows nt
+  byte DIR_CrtTimeTenth; // vedi specifiche 
+
+  word DIR_CrtTime ;  // ora di creazione 
+  word DIR_CrtDate; // data di creazione 
+  word DIR_LstAccDate; // Ultimo accesso
+
+  word DIR_FstClusHI; // parte alta indirizzo clusterFAT32 
+
+  word DIR_WrtTime ;  // ora di scrittura 
+  word DIR_WrtDate; // data discrittura
+  word DIR_FstClusLO; // Parte bassa dell'indirizzo   
+
+  dword DIR_FileSize; // grandezza del file in byte 
+
+} __attribute__((packed))SHORT_ENTRY;  
+
+
+//typedef struct _LONG_ENTRY_FAT LONG_ENTRY_FAT;
+
+typedef struct _LONG_ENTRY_FAT_ { 
+  byte    LDIR_Ord;     // Ordine delle entrate 
+  word    LDIR_Name1[5];   // 1-5  
+  byte    LDIR_Attr;    // attributo ( directory lunga)
+  byte    LDIR_Type;    // e 
+
+  byte  LDIR_Chksum ;       // Checksum, 
+  word LDIR_Name2[6];     // data di creazione 
+  word LDIR_FstClusLO;   // Deve essere zero
+  word LDIR_Name3[2];     //  
+
+  //  LONG_ENTRY_FAT * next_long_entry;  // prossima tabella  
+
+}__attribute__((packed))LONG_ENTRY;  
+
+
+
+struct _msdos_date_  { 
+ unsigned  Day :5; 
+ unsigned Month:4; 
+ unsigned Years:7; 
+}__attribute__((packed));
+
+typedef struct _msdos_date_ msdos_date; 
+
+struct _msdos_time_ { 
+  unsigned Second:5;
+  unsigned Minutes:5; 
+  unsigned Hours:6; 
+}__attribute__((packed));
+  
+typedef struct  _msdos_time_ msdos_time; 
+
+
+
+
+/*ENTRY DIR */ 
+
+#define FREE             0xE5                //direcotory libera
+#define ALL_FREE    	 0x00                // finite le direcotry 
+
+#define ATTR_READ_ONLY 	 0x01 
+#define ATTR_HIDDEN      0x02 
+#define ATTR_SYSTEM      0x04 
+#define ATTR_VOLUME_ID   0x08
+#define ATTR_DIRECTORY   0x10 
+#define ATTR_ARCHIVE     0x20 
+#define ATTR_LONG_NAME     (ATTR_READ_ONLY  | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID)
+#define ATTR_LONG_NAME_MASK   (ATTR_READ_ONLY  | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID | ATTR_DIRECTORY | ATTR_ARCHIVE)
+
+#define MASK_LAST_NAME 0x40
+#define PADDING 0xFFFF
+#define SIZE_NAME_PART 13
+#define SIZE_NAME 260
+#define SIZE_BUF 1024
+#define SIZE_ENTRY 32
+#define SIZE_NAME_SHORT 11 
+#define MAX_NAME 260
+#define MAX_PATH 260 
+
+#define SIZE_UNO 5
+#define SIZE_DUE 6
+#define SIZE_TRE 2
+
+#define DELETED_FLAG 0xE5
+#define MSDOS_NAME 11 
+
+
+
+void print_directory ( byte label, dword chain );
+void test_dir (byte label); 
+
+
+// crea un entry sulla cartella father e salva sul contenuto su new che viene creato
+BOOL create_entry(const char * name , byte type,  const FCB * father, FCB * new);  
+// crea new e carica i valori della direntry cercata
+BOOL open_entry(const char * name , const FCB * father, FCB * new);  
+//elimina direnetry
+BOOL delete_entry( const FCB *);  
+
+
+#endif
+
+/***********FAT ***************************************************************************************
+
+Utiliziamo il file system fat introdotto con windows 95 o meglio la struttura BPB fondamentale 
+per il corretto funzionamento. 
+Usiamo lo stesso modello Micro$oft per analizare il filesystem vedi dopo
+
+-Assuminamo che i settori siano da 512 byte 
+ 
+ Il filse system fat è diviso in tre parti separate : 
+     0-REserved Region 
+     1-FatRegion 
+     2-Root Direcoty Region ( non esiste su fat32) 
+     3-File e Directory 
+   
+ +----------------------------------------------+-------------+-----------------+---------------------------------+
+ | AREA RISERVATA                               |FAT          | ROOT DIRECTORY  |  REGIONE DATI |
+ +------------------+-------------+-------------+------- ------+-----------------+---------------+
+ | Settore d'avvio  | Info FS        | RISERVATI   | FAT1 | FAT2 | Roott directory | Dati          |
+ | (BPB+altro)       | Solo Fat32  | Opzionale   |      |      | FAT12 FAT 16    |               |
+ +------------------+-------------+-------------+------+------+-----------------+---------------+
+ |n_sec_reserved                                | n_fat*fats  |RootDirSector    |numero_di_c    |
+ +----------------------------------------------+-------------+-----------------+---------------+
+
+
+
+*******************************************************************************************************/ 
+// 
+#ifndef FAT_H
+#define FAT_H
+
+#include <type.h> 
+#include <mbr.h> 
+#include <fs.h>
+
+#define BOOT_SIG    0x29    // parametri di boot estesi 
+#define BPB_SIZE    512
+#define SECT_SIZE   512
+#define SIZE_ENTRY_FAT_32 4
+
+/*chain of the fat 32*/ 
+
+#define EOC_32             0x0FFFFFF8 
+#define MASK_32  	   0x0FFFFFFF
+#define BAD_CLUSTER_32 	   0x0FFFFFF7
+#define FREE_32		   0x00000000	
+
+
+
+/*******************STRUTTURE FAT BASE ****************************************************************/
+/* 
+ BPB usato per i filesystem FAT12 FAT 16 
+*/ 
+
+
+typedef struct _BPB_16_ {
+  
+  byte  BS_DrvNum;         // numero drive 
+  byte  Reserved1;         // byte iservato per Windows NT 
+  byte  BS_BootSig;        // se è uguale 0x29 (boot signature ) sono settati i valori successi
+  dword BS_VolID;          // volume serial number 
+  byte  BS_VolLab[11];     // Ettichetta registrata nella root directori
+  byte  BS_FilSysType[8];  // tipo file system 
+
+}__attribute__((packed))BPB_16;  
+
+
+/* 
+ BPB usato per i filesystem FAT12 FAT 16 
+*/ 
+
+typedef struct _BPB_32 { 
+
+  dword  BPB_FATsz32;                //grandezza FAT for FAT32 in settori  
+  word   BPB_ExtFlags;              // estesi flag vedi specifiche 
+  word   BPB_FSVer;                 // versione di FAT32 viene attivata con i flag precedenti 
+  dword  BPB_RootClus;              // imposta il numero (indirizzo) del primo cluster dellaroot directory ---- WARNIN----
+  word   BPB_FSInfo;                // numero settore nella regione riservata che contiene la struttura FSINFO  
+  word   BPB_BkBootSec;             // indica il settore di backup del boot sector 
+  byte   BPB_Reserved[12];          // riservato per futuri uytilizzi
+ 
+  byte  BS_DrvNum;                    // numero drive 
+  byte  Reserved1;                    // byte iservato per Windows NT
+  byte  BS_BootSig;                   // 0x29 boot signature 
+  dword BS_VolID;                     // volume serial number 
+  byte  BS_VolLab[11];                // Ettivchetta registrata nella root directori
+  byte  BS_FilSysType[8];             // tipo file system 
+}__attribute__((packed))BPB_32;
+
+
+
+/*
+ *BPB  sara un po piu complessa ( usa le unioni per le parti non comuni 
+ */
+
+
+typedef struct _BPB_ {
+
+  /* Fine tratto comune fra  FAT12/16/32 */ 
+
+  byte BS_jmpBoot[3];     // istruzione di salto ????????
+  byte BS_OEMName[8];     // stringa, nome del sistema su cui è stato formatato il disco (mkmsdos) 
+  
+  word BPB_BytsPerSec;    // Byte per settore ( tipicamente 512) 
+  byte BPB_SecPerClus;    // Numero di settori per unita di allocazione, deve essere una potenza di due  
+
+  /* N.B  Il numero di byte per unita di allocazione  deve essere sempre minore di 32k 
+   * bytePerSec * SecPerClus < 32k
+   */
+
+  word  BPB_RsvdSecCnt;  // numero di settori riservati vedi apppunti Non puo essere zero 
+                         // fat12/16 non puo essere diverso da zero 
+                         // fat32   tipicamnete 32 
+
+  
+  byte BPB_NumFATs;      //  numero di tabelle ridondanti presenti nel volume tipicamnete 2 
+                         // ed è fortamente racomandato  MI$CROSFT è che sia 2 
+
+  /* Questo campo contiene il numero di voci presenti nella cartella di root! 
+   * vale zero per il fat 32 mentre assume senso per i vari fat12/16! vedi regole nel documento */ 
+
+  word BPB_RootEntCnt;   
+
+  word BPB_TotSec16;    // numero totale di settori per volume  
+
+  byte BPB_Media;       // diferernzia volumi rimovibili e volumi fissi 
+
+  word BPB_FATSz16;     // vale solo per fat12/16 indica la grandezza della fat in settori 
+
+  word BPB_SecPerTrk;   // questo campo contien i settori per traccia vale per dispositivi mobili
+ 
+  word BPB_NumHeads;    // n umero di testine come prima 
+ 
+  dword BPB_HiddSec;    // Numero di settori che precedono la partizione che contiene questo volume
+
+  dword  BPB_TotSec32;  // numero settori tottali nel volume per fat32 
+
+  /* Fine tratto comune fra  FAT12/16/32 */ 
+
+  union { 
+    BPB_16 bpb_16; // BPB 12/16 
+    BPB_32 bpb_32; 
+  }; 
+ 
+  byte body[420]; 
+  byte magic_number[2]; 
+}__attribute__((packed))BPB; 
+  
+
+typedef struct _CLUSTER_LIST_  CLUSTER_LIST; 
+
+// SOLO FAT 32
+
+struct   _CLUSTER_LIST { 
+  dword  cluster; 
+  CLUSTER_LIST  *next; 
+};
+
+/******************* END STRUTTURE FAT BASE ****************************************************************/
+
+
+
+/*********************************************MACRO**********************************************************/
+
+/* Individuiamo la regione dei dati mediante l'indirizzo al primo settore 
+   Calcoliamo il FirstDataSector=
+   FirstDataSector = Reserved Region + FatRegion + Root Direcoty Region ( non esiste su fat32)
+  
+   1) Ci serve sapere la grandezza della regione riservata!! ??
+   2) Grandezza regione fat  ??  
+   3) Root Direcory ????
+
+   1) E' un campo del BPB : DWORD BPB_RsvdSxecCnt (offset 14 ) grandezza espressa in settori 
+   2) grandezza della regione fa, sarà uguale a FatSize * numero di fat 
+   3) nel caso sia presente la root directory ( filesystem 16/12 ) dobbiamo sapere quando è grande 
+
+   -----> calcolo grandezza root directory 
+   la grandezza della root directory sara uguale a :  numero entry * sizeof(entry) [ 32 byte ] 
+
+
+  Primo settore dei dati = BPB_RsvdSecCnt + (BPB_NumFatsz) + RootDirSectors  ( indirizzo riferito al primo settore del volume che contien e il BPB 
+
+   ...
+
+// COme faccioa ad individuare la FAT???
+
+*/ 
+
+
+
+/*ROOT_DIR_SECTOR : 
+ *Calcola la grandezza della root directori nei file system FAT16 FAT 12 *
+ *************************************************************************/
+
+#define RootDirSector(n_ent_root, byts_for_sect)  (((n_ent_root*32)+(byts_for_sect-1))/byts_for_sect) 
+
+/*FIRST_DATA_SECTOR
+ *Calcola il primo settore della regione dati relativo all'inizio del volume 
+ */
+
+#define FirstDataSector(n_sect_reserved, n_FATs, FAT_size, root_dir_sector)  n_sect_reserved + (n_FATs * FAT_size) + root_dir_sector 
+
+/* SIZE_DATA
+ * Calcolo grandezza area  dati in settori 
+ */
+
+#define SizeData( n_cluster, setor_for_cluster) n_cluster*sector_for_cluster
+
+/*FIRST_DATA_SECTOR
+ *Primo settore di un cluster N puo esere realativo al disco o al volume in base al valore di first_data_sector 
+ */
+#define FirstDataSectorOfCluster(N, set_for_cluster, first_data_sector) (((N-2)*set_for_cluster)+first_data_sector)
+
+/*FAT_SIZE *
+ *Grandezza regione FAT in settori
+ */ 
+
+#define FATsize( FAT16_size, FAT32_size) (FAT16_size != 0) ? FAT16_size : FAT32_size 
+
+/*FIRST_sect_FAT 
+  Primo settre della fat 
+*/ 
+#define FirstSectFAT(n_sect_reserved) n_sect_reserved
+
+#define LastSectFAT(First, size) First+size 
+
+/*TOT_SECTOR
+ *TOttale settori del disco 
+ */ 
+
+#define TotSector(TotSect16, TotSect32) (TotSect16 != 0) ? TotSect16 : TotSect32
+
+/* Data SIZE 
+ * Grandezza della regione dati in settori 
+ */ 
+#define DataSize( tot_sec, n_sect_reserved, n_FAT, FAT_size, root_dir_sector) tot_sec-( n_sect_reserved + (n_FAT * FAT_size) + root_dir_sector)
+
+
+/* Data SIZE CLUSTER
+ * Grandezza della regione dati in cluster 
+ */ 
+#define DataSizeCluster( DataSize, set_for_cluster) DataSize / set_for_cluster 
+
+/* getSectRoot */ 
+#define FirstRootDirSecNum(n_sect_reserved, n_FAT, FAT_size) n_sect_reserved + ( n_FAT*FAT_size)
+
+
+/* Dato un cluster_number N, dove nella FAT è il record per quel cluster numero?  
+ */ 
+
+#define FATSectorNum( N, FirstSectFat, type, byte_for_sect)  FirstSectFat + ( N* ((type == FAT16) ? 2 : 4))/byte_for_sect
+
+#define FATOffset( N, type, byte_for_sect)   ( N* ((type == FAT16) ? 2 : 4))%byte_for_sect
+
+/*Macro specifiche per fat 32 con settori da 512 */
+
+#define FATSectorNum_32(N, First) FATSectorNum(N,First, FAT32, 512) 
+#define FATOffeset_32(N) FATOffset(N, FAT32, 512) 
+
+
+/* PER LA MEMORIA*/ 
+// Dato l'indirizzo della fat ritorna 
+
+//#define getNext ( fat, cluster) 
+
+/* ENTRY*/ 
+
+
+/************************************************************END MACRO*************************************************************/
+
+
+
+// Poiche il dirver lavora su  
+
+
+/*
+unsigned char FAT_table[cluster_size];
+unsigned int fat_offset = active_cluster * 4;
+unsigned int fat_sector = first_fat_sector + (fat_offset / cluster_size);
+unsigned int ent_offset = fat_offset % cluster_size;
+ 
+//at this point you need to read from sector "fat_sector" on the disk into "FAT_table".
+ 
+//remember to ignore the high 4 bits.
+unsigned int table_value = *(unsigned int*)&FAT_table[ent_offset] & 0x0FFFFFFF;
+ 
+//the variable "table_value" now has the information you need about the next cluster in the chain.
+
+
+
+
+typedef struct _ENTRY_FAT_ { 
+  
+  SHORT_ENTRY_FAT short_entry; 
+  LONG_ENTRY_FAT * long_entry;  
+
+}ENTRY_FAT; 
+
+
+
+
+/*FUNZIONI************************************************************************************************************************/
+
+/*Solo FAT32 */ 
+
+/* FUNzione che determina precisamente che tipo di file sistem è 
+   Seguo loa standard micro$oft
+*/
+
+byte getFileSystemType ( dword DataSizeCluster ); 
+
+/* Funzione che analizza la FAT e riporta la lista di cluster di un FILE 
+CLUSTER_LIST  get_chain_cluster ( dword first_cluster); 
+*/ 
+
+/* Funzione dato il cluster mi rendono il settore */  
+
+
+// QUESTE SONO LE FUNZIONI CHE MI ASTRAGONO IL FILE DAI SETTORI E CLUSTE E LO MOSTRANO COME INSIEME DI BYTE 
+dword  get_cluster( dword offset, CLUSTER_LIST ); 
+dword  get_cluster_offset ( dword  offset, CLUSTER_LIST); 
+
+
+
+/*
+// funzione che rende la lista del entry di una directory a partire dalla lista dei cluster; 
+list_entry_fat * get_dir_entry( list_cluster_dir * list); // lavora nella regione dati 
+lista_cluster *  get_chain_cluster ( first_cluster); 
+dword write_sect(dword number_of_sector , buff, size_guff); 
+dword read_sect(dword number_of_sector, buff, size_buff); 
+
+
+
+sector get_settore ( offset, cluster); 
+sector get_settore_offset ( offset, cluster); 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+lista_cluster get_free_cluster(size); 
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+*/
+
+
+
+BOOL init_fat();
+
+dword getNext( dword_ptr fat , dword cluster);   // lavora su fat 
+
+/***********************************************************************************/
+
+
+
+/* GESTIONE FAT ********************************************************************
+ * Interfaccia che mi permette di gestire la tabella FAT			   *
+ * Funzioni elementari che lavorano sulla tabella FAT				   *
+ ***********************************************************************************/
+
+
+// aggiunge un cluster alla lista chain
+// se chain è zero la crea 
+BOOL append_fat (const byte volume, const dword chain, dword* addr); 
+// elimina l'ultimo cluster dalla lista chain 
+BOOL delete_fat (const byte volume, const dword chain); 
+// elimina tutta una lista chain 
+BOOL delete_all_fat (byte volume,dword chain); 
+
+dword get_next_fat(const fat_ptr fat, const dword cluster); 
+void test_fat (byte label);
+BOOL create_fat (const byte volume, dword* chain); 
+#define isLast_fat(N) ((N&MASK_32)==EOC_32)
+/************************************************************************************/
+
+
+/*GESTIONE CARTELLE A BASSO LIVELLO */ 
+
+/*FUNZIONE 
+ *Estrae dal disco la lista dei FCB contenuti in una cartella, individuata da
+ * label ( per individuare il volume),first_cluster per individuare il primo 
+ * Cluster della catena di cui la tabella è composta
+ */ 
+void  get_dir_entry(byte,  dword  first_cluster); // lavora nella regione dati 
+
+/*Funzione che crea un entry nella directory specificata da label cluster 
+  con il nome passato come argomento, rende il fcb del nuova entry
+ */ 
+FCB * create_dir_entry(byte label, dword first_cluster, const char * name_entry);
+
+/* FUNZIONE CHE elimina un entry */
+
+BOOL delete_dir_entry(FCB* file); 
+
+
+
+void print_list_entry_dir ( void); 
+/***********************************************************************************/
+
+
+
+void print_chain( byte volume, dword chain );
+
+
+#endif 
+#ifndef FS_H 
+#define FS_H 
+
+
+// alineo la struttura a quattro byte 
+#define ADDR_VOLUME 0
+#define ADDR_PWD    4
+#define ADDR_FCB    264 
+
+#define MAX_FILE 3 
+#define SIZE_VOLUME 4 
+#define MUTEX 1
+#define ROOT_CLUSTER 2
+/*struttre che mi permettono l'astrazzione del file system*/ 
+
+
+typedef struct _FCB_ FCB;
+
+struct _FCB_{ 
+  
+  char name[260];	 //nome lungo del file
+  
+  //posizione data 
+  
+  byte volume; 
+  dword cluster; 	//primo cluster data 
+  
+  // info file 
+  
+  byte type;		// flag 
+  byte mode; 		//modalita 
+  dword pos_corr;   	// posizione corrente   	
+  dword semaphore; 	//semaphore per le directory 
+
+  //info directory padre
+
+  dword cluster_father; 	//cluster del padre 
+  lword offset_father;          // offset in byte nel padre 
+  word  n_entry; 		// n_entry di cui è composto 
+  
+  
+  // info fileSystem
+  
+  word CrtTime ; 	 // ora di creazione 
+  word CrtDate; 	 // data di creazione 
+  word LstAccDate; 	 // Ultimo accesso
+  word WrtTime ;  	 // ora di scrittura 
+  word WrtDate;		 // data discrittura
+  dword size; 		 // grandezza file
+  
+}; 
+
+
+typedef struct _DIRECTORY_ DIRECTORY; 
+
+struct _DIRECTORY_ { 
+
+  char path[255]; 
+  char name [255]; 
+
+  byte dispositivo; // servono per essere generale  
+  byte fileSystem;  // idem 
+
+  byte loock; // 
+  byte mode;  // inutili in questo caso 
+
+  void * physic_des; // (puo puntare ad una cluster fat o un indoe ext ) 
+  
+
+}; 
+
+
+
+
+#endif 
+
+
+/*HEADER
+ *Interfaccia per la gestione dell'MBR per poter gestire i volumi presenti su un disco
+ */ 
+
+#ifndef MBR_MY
+#define MBR_MY
+
+#include "type.h" 
+
+
+/*[DEFINE]-----------------------------------------------------------*/
+#define EMPTY 0x00
+#define FAT12 0x01 
+#define FAT16 0x06
+#define FAT32 0x0B
+#define EXTEND 0x05
+
+#define MBP_SIZE 446 
+#define MBT_SIZE 64
+#define MBR_SIZE 512 
+
+/*-----------------------------------------------------------------*/
+
+
+/*[STRUTTURE DATI]-------------------------------------------------*/
+
+
+
+/* Layout dei recodr della BMT 
+  +--------------------------------------------------------+
+  |OFFSET| SIZE | DESCRIPTION                              |
+  +--------------------------------------------------------+
+  |0x00  |  1   | FLAG boot 0x00 (non attivo ) 0x80 attivo |
+  +--------------------------------------------------------+
+  |0x01  |  3   | CHS ADDRESS FIRST                        |
+  +--------------------------------------------------------+
+  |0x04  |  1   | TYPE                                     |
+  +--------------------------------------------------------+
+  |0x05  |  3   | CHS ADDRESS LAST                         |
+  +--------------------------------------------------------+
+  |0x08  |  4   | LBA                                      | 
+  +--------------------------------------------------------+
+  |0x0C  |  4   | NUMBER SECTOR                            | 
+  +--------------------------------------------------------+
+
+ Formally, status values other than 0x00 and 0x80 are undefined.
+
+ Starting Sector fields are limited to 1024 cylinders, 255 heads,
+ and 63 sectors;[citation needed]. Ending Sector fields have the 
+ same limitations.
+
+ The range for sector is 1 through 63; the range for cylinder is 
+ 0 through 1023; the range for head is 0through 254 inclusive.
+
+ The 10-bit cylinder value is split into two bytes. The value
+ can be reassembled using this formula: 
+  cylinder = ((byte[2] & 0xc0) << 2) | byte[3]
+*/
+ 
+typedef struct _RECORD_MBT_ { 
+ 
+  byte boot_flag;
+  byte chs_first_sector[3];
+  byte type;
+  byte chs_last_sector[3]; 
+  dword lba; 
+  dword number_sectors; //Number of sectors in partition
+
+}RECORD_MBT; 
+
+/*MBT */
+typedef struct _MBT_ { 
+        RECORD_MBT record_mbt[4]; 
+}MBT; 
+
+/*MBP*/
+typedef struct _MBP_ { 
+        byte body[446]; 
+}MBP; 
+
+/*Struttura del Master Boot Record , è presente nel primo settore del disco 
+ * , ha una grandezza di 512 byte ( grandezza settore ).
+ * E' composto da due parti: 
+ *      - MBP : codice che viene messo in esecuzione dal BIOS ( generlmente
+ *              carica il bootmanager. SIZE 446 byte
+ *      - MBT : tabella delle partizioni , 4 record da 16 byte.
+ * 
+         +------------------------------------------------------+
+         | HEX | DEC |       CONT                 |       SIZE  |
+         +------------------------------------------------------+
+         |0000 |0    | code area                  |440(max. 446)|
+         +------------------------------------------------------+
+         |01B8 |440  |disk signature (optional)   |4            |
+         +------------------------------------------------------+
+         |01BC |444  |Usually nulls;0x0000        | 2           |
+         +------------------------------------------------------+
+         |01BE |446  |Table of primary partitions |64           |
+         -------------------------------------------------------+
+         |01FE |510  |  0xAA55  MBR signature;    | 2           |
+         +------------------------------------------------------+
+
+*/
+
+//#pragma pack(1) 	// alineo la struttura al byte altrimenti non funziona 
+
+
+typedef struct _VOLUME_LIST_ VOLUME_LIST; 
+typedef RECORD_MBT RECORD_VOLUME; 
+
+// Struttura per la gestione dei volumi 
+ 
+struct _VOLUME_LIST_ { 
+  RECORD_VOLUME record_volume; 
+  VOLUME_LIST * next;  
+};  
+
+// struttura di un indirizzo CHS
+
+typedef struct _CHS_ { 
+  byte head; 
+  word cylinder;
+  byte sector;  
+
+}CHS; 
+
+typedef struct _MBR_ { 
+        MBP mbp;    
+        MBT mbt ; 
+        byte magic_number[2]; 
+}__attribute__((packed)) MBR; 
+
+/*INTERFACIA*********************************************************/
+
+
+// vrea la lista dei volumi sul disco 
+//( Analizza anche le partizioni estese e ci porta una lista trasparente) 
+VOLUME_LIST * get_list_volume ( int); 
+//STAMPA la lista dei volumi 
+void stampa_list_volume(VOLUME_LIST *); 
+// elimina la lista dei volumi 
+BOOL delete_list_volume (VOLUME_LIST **);
+// ritorna il primo settore CHS del volume
+CHS get_first_sector ( RECORD_VOLUME * record);
+// ritorna l'ultimo settore CHS del volume 
+CHS get_last_sector ( RECORD_VOLUME * record);
+// verifica che ci sia un magic number
+BOOL check_boot_sector ( MBR  * j); 
+/********************************************************************/
+
+#endif 
+/*SISTEMA.H 
+ *FIle di interfaccia con in modulo sistema
+ */
+
+
+#ifndef INTERFACCIA_SISTEMA_H 
+#define INTERFACCIA_SISTEMA_H 
+
+#include "tipo.h"
+#include "type.h" 
+#include "costanti.h"
+
+int get_partizione ( dword ata, natl disco , natl tipo, int indice); 
+int read_part_n  (natl ata, natl disco, natl indice_partizione, natl indice_settore, natl n_blocchi, void * buf);
+int write_part_n (natl ata, natl disco, natl indice_partizione, natl indice_settore, natl n_blocchi, void * buf); 
+void flog(log_sev, cstr fmt, ...);
+void* mem_alloc(natl dim, natl balign );
+void mem_free(void *p);
+
+#endif
+
+#ifndef _SYSTEM_CALL_FS_ 
+#define _SYSTEM_CALL_FS_ 
+
+
+#define O_RDONLY             0x00
+#define O_WRONLY             0x01
+#define O_RDWR               0x02
+#define O_CREAT              0x40  
+#define O_DIRECTORY    	     0x10000
+
+#define IS_DIRECTORY(X) (X & O_DIRECTORY)
+#define IS_CREAT(X)     (X & O_CREAT)
+#define IS_READ(X) 	(!X) 
+#define IS_WRITE(X) 	(X & O_WRONLY)
+#define IS_RDWR(X) 	(X & O_RDWR)
+
+//si fa riferimento all'inizio del file: il valore (sempre positivo) di offset indica direttamente la nuova posizione corrente.
+#define SEEK_SET 0		
+
+//si fa riferimento alla posizione corrente del file: ad essa viene sommato offset (che può essere negativo e positivo) per ottenere la nuova posizione corrente.
+#define SEEK_CUR 1
+
+//si fa riferimento alla fine del file: alle dimensioni del file viene sommato offset (che può essere negativo e positivo) per ottenere la nuova posizione corrente.
+
+#define SEEK_END 2
+
+#define IS_SEEK_END(X)  (X==SEEK_END) 
+#define IS_SEEK_SET(X)  (X==SEEK_SET)
+#define IS_SEEK_CUR(X)	(X==SEEK_CUR)
+
+int open (const char * path , dword ); 
+int test_system_call(); 
+size_t read(int fd, void *buf, size_t count);
+size_t write(int fd, void *buf, size_t count); 
+size_t lseek(int fd, size_t offset, int whence);
+
+#endif 
+
+#ifndef  VOLUMI_H 
+#define  VOLUMI_H 
+
+
+#include "type.h"
+#include "fat.h" 
+#include "string.h" 
+
+
+#define N_ATA    2 
+#define N_DISK  2
+#define SECT_SIZE 512 
+
+typedef struct _TABELLA_VOLUMI_ TABELLA_VOLUMI; 
+typedef struct _INFO_FAT_ INFO_FAT; 
+
+/*SOLO FAT 32 */
+
+struct _INFO_FAT_ { 
+ 
+  dword first_cluster_directory; 
+
+  dword first_set_data; 
+  dword size_data; 
+  
+  dword first_set_fat; 
+  dword size_fat;
+
+  byte sectors_for_cluster; 
+  word  byts_for_sector; 
+
+}__attribute__((packed));
+
+
+
+
+struct _TABELLA_VOLUMI_ { 
+
+  /* INFORMAZIONI GENERALI VOLUME */
+  byte type_fs;
+  byte ata;
+  byte disco; 
+  byte indice_partizione; 
+  byte label; 
+
+    /* INFORMAZIONI GENARALI FS */
+  INFO_FAT fat_info;    // struttura che contiene info di basso livello del fs
+  dword_ptr  fat;                       // indiirizzo fat caricata in memoria 
+  /*************************************/
+
+  dword_ptr root;     // puntatore al primo cluster della directiri di root 
+  FCB   fcb_root; 
+  dword semaphore;    // mutua esclusione 
+  
+  TABELLA_VOLUMI * next; 
+
+}__attribute__((packed));
+
+
+
+/*INTERFACCIA Tabella volumi
+ * Funzioni che ci vengono messe a disposizione dall'oggetto tabella dei volumi 
+ * per la sua corretta gestione.
+ */ 
+
+// funzione che inizializza la tabella dei volumi 
+TABELLA_VOLUMI * crea_tabella_volumi(); 
+// funzione che riporta un entrata della tabella dei volumi 
+TABELLA_VOLUMI * get_volume ( byte label) ; 
+
+// funzione di debug che stampa il contenuto della tabella dei volumi 
+#ifdef DEBUG_FS 
+  void stampa_tabella_volumi( const TABELLA_VOLUMI * list);
+#endif
+
+  
+#endif
+
+#include "data.h"
+#include "fat.h" 
+#include "volumi.h" 
+#include "sistema.h"
+#include "type.h"
+#include "errno.h" 
+
+/*******************************************************************************
+ *IMPLEMENTAZIONE DELL'INTERFACCIA PER LA GESTIONE DELLA ZONA DATI DEL DISCO   *
+ *******************************************************************************/ 
+
+/* FUNZIONE WRITE_DATA **********************************************************
+ * La funzione write_data scrive il buffer nella catena specificata da          *
+ * chain astraendo il concetto di cluster. La posizione nella catena è data 	*
+ * da offset.Se il buffer da scrivere è maggiore dello spazio libero presente	*
+ * su chain la funzione aggiunge un ulteriore cluster.  			*
+ * 										*
+ * LABEL  : volume sul quale scrivere						*
+ * CHAIN  : catena di cluster coinvolta nella scrittura				*
+ * OFFSET : posizione su cui scrivere						*
+ * BUF    : buffer di input							* 
+ * SIZE   : grandezza del buffer da scrivere					*
+ * 										*
+ * Se tutto la scrittura ha avuto successo ritorna il numero di byte scritti, 	*
+ * altrimenti ritorna -1.							*
+ * N.B se l'offset interessa una parte della catena non presente questa fun-	*
+ * zione deve estendere la catena ( specifica UNIX )				*
+ ********************************************************************************/
+
+
+int write_data(byte label , dword chain, size_t offset, const byte * buf, size_t size){ 
+
+
+  TABELLA_VOLUMI * part=NULL; 
+  dword size_cluster_byte=0; 
+  dword  offset_cluster_first=0,offset_cluster_last=0, n_cluster=0, n_load_cluster=0; 
+  dword i=0; 
+  dword temp_chain=chain, settore=0, n_settori=0,resto_cluster=0;
+  byte *cluster=NULL; 
+  fat_ptr fat=NULL; 
+  lword n_write=0; 
+  
+   // non è un errore
+  // se in questo caso viene settato un offset , questo è ignorato 
+  if ( size == 0) { 
+    reset_errno(); 
+    return 0; 
+  }
+   
+  //verifico i parametri
+  if ( chain <2  || buf==NULL || size <0) {
+      set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+      return -EINVAL;
+  }
+  
+ 
+  //verifico il volume
+  if (!(part=get_volume(label))) {
+      set_errno(EINVAL,"Volume errato (%s-line%d)", __FILE__, __LINE__); 
+      return -EINVAL;
+  }
+
+  //verifico la catena 
+  if (!get_next_fat(part->fat, chain)) {
+      set_errno(EINVAL,"Chain errato (%s-line%d)", __FILE__, __LINE__); 
+      return -EINVAL;
+  }
+ 
+  // grandezza cluster ( varia tra disco e disco) 
+  size_cluster_byte=part->fat_info.sectors_for_cluster*part->fat_info.byts_for_sector; 
+  // prelevo puntatore alla fat 
+  fat=part->fat; 
+  
+  // alloco grandezza cluster 
+  if(!(cluster=mem_alloc(size_cluster_byte,1))){
+      set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+      return -ENOMEM; 
+  }
+  
+  memset(cluster,0, size_cluster_byte);
+  
+  // calcoliamo quanti cluster dobbiamo scorrere prima di trovare quello che serve a noi 
+  n_cluster= offset/size_cluster_byte;
+  // calcolo l'offset che mi interessa all'interno del primo cluster 
+  offset_cluster_first= offset%size_cluster_byte; 
+  //calcolo l'offset che mi interessa sull'ultimo cluster 
+  offset_cluster_last=(size%size_cluster_byte+offset_cluster_first)%size_cluster_byte; 
+  // calcolo quanto spazio rimane nel primo cluster a partire da offset 
+  resto_cluster= size_cluster_byte - (offset_cluster_first);
+  //calcoliamo quanti cluster caricare in memoria 
+   n_load_cluster=((offset_cluster_first+size)/size_cluster_byte) + (((offset_cluster_first+size)%size_cluster_byte)?1:0);  
+  // salvo il numero di settori di cui è composto un cluster 
+  n_settori=part->fat_info.sectors_for_cluster;
+  
+  //Scorre finché non trovo il primo cluster coinvolto nella scrittura 
+  for ( i=0; i< n_cluster; i++) {
+      if(!(temp_chain=get_next_fat(fat,temp_chain))){  
+	set_errno(EINVAL,"Offset errato o chain corrotta (%s-line%d)", __FILE__, __LINE__); 
+	mem_free(cluster);
+	return -EINVAL; 
+      }
+      
+       if (temp_chain == EOC_32 && offset) { 
+	if(!append_fat(label, chain, &temp_chain))  {
+	  mem_free(cluster); 
+	  return -1; 
+	}
+   }
+  }
+  
+  // Nel caso si faccia una scrittura con un offset pari alla grandezza di un cluster,  
+  // e la catena è formata da un solo , la funzione deve aggiungere il cluster 
+  // e poi eseguire la scrittura su questo nuovo cluster. 
+  // questo caso lo trattiamo facendo l'aggiunta del cluster in anticipo. 
+  
+  // ES offset=4096 size =1 
+  
+  //se offset è diverso da zero si ricade nelle scritture a cavallo tra più cluster 
+//   if (temp_chain == EOC_32 && !offset_cluster_first && offset) { 
+// 	if(!append_fat(label, chain, &temp_chain))  {
+// 	  mem_free(cluster); 
+// 	  return -1; 
+// 	}
+//    }
+  
+#ifdef DEBUG_FS
+  flog(LOG_DEBUG, "Primo cluster  : %d", temp_chain);
+  flog(LOG_DEBUG, "Size Cluster   : %x", size_cluster_byte); 
+  flog(LOG_DEBUG, "n_load_cluster : %d", n_load_cluster);    
+  flog(LOG_DEBUG, "Offset first   : %d", offset_cluster_first); 
+  flog(LOG_DEBUG, "Resto          : %d", resto_cluster); 
+  flog(LOG_DEBUG, "Offset last    : %d", offset_cluster_last); 
+#endif    
+      
+  //Su temp_chain ho il primo cluster coinvolto nella scrittura 
+	
+  for (i=0; i< n_load_cluster; i++)  {
+    
+        // calcolo il settore poiché il driver lavora sui settori 
+        // Verifica la consistenza della catena o dell'offset simile al controllo alla linea 94 
+      if ( temp_chain !=0 && temp_chain != EOC_32) 
+	settore=FirstDataSectorOfCluster(temp_chain, part->fat_info.sectors_for_cluster, part->fat_info.first_set_data); 
+      else {
+	    set_errno(EINVAL,"Offset errato o chain corrotta (%s-line%d)", __FILE__, __LINE__);  
+	    mem_free(cluster);
+	    return -1;
+      }
+ 
+      //Gestione buffer di scrittura 
+      
+      // il primo è l'ultimo cluster vanno trattati in modo diverso 
+ 
+      // GESTIONE PRIMO CLUSTER 
+      if (i==0) { 
+	  
+	  read_part_n(part->ata, part->disco, part->indice_partizione, settore, n_settori, (void *) cluster); 
+
+	  if ( size > resto_cluster)  {  
+	    memcpy((cluster+offset_cluster_first), buf,  resto_cluster); 
+	    n_write+=resto_cluster;
+	    buf+=resto_cluster;
+	  }else  {
+	    memcpy((cluster+offset_cluster_first), buf, size);
+	    n_write+=size;
+	    buf+=size; 
+	  }
+        // GESTIONE ULTIMO CLUSTER 
+      } else if ( i==(n_load_cluster -1)) {  
+	    read_part_n(part->ata, part->disco, part->indice_partizione, settore, n_settori, (void *) cluster); 
+      	    memcpy(cluster, buf, offset_cluster_last);
+	    buf+=offset_cluster_last; 
+	    n_write+=offset_cluster_last; 
+      }
+      //GESTIONE RESTANTI CLUSTER 
+	else { 
+	  memcpy(cluster,buf, size_cluster_byte);
+	  buf+=size_cluster_byte; 
+	  n_write+=size_cluster_byte; 
+	}
+	
+    
+    write_part_n(part->ata, part->disco, part->indice_partizione, settore, n_settori, (void *) cluster);
+    
+    // prelevo il successivo devo crearlo se non presente  
+    if (!(temp_chain= get_next_fat(fat, temp_chain)))  {
+	mem_free(cluster);
+	return -1; 
+    }
+    
+    // significa che sono all'ultimo , ma non ho finito le scritture 
+    // quindi l'ho aggiungo, a differenza del caso di sopra arrivo 
+    // a questa condizione dipende dalla grandezza del buffer 
+    if (temp_chain == EOC_32 && i < (n_load_cluster -1)) {
+	if(!append_fat(label,chain, &temp_chain)) {
+	  mem_free(cluster);
+	  return -1; 
+	}
+      }
+  
+  } //for 
+  
+  
+  return n_write; 
+  
+}
+
+
+
+/* La funzione test_write serve a testare la write, per verificare la corretta gestione 
+ * delle situazioni critiche :
+ *  * 1) se io passo un valore di chain errato o un offset errato la funzione deve rilevarlo *
+ */
+
+
+
+void test_write (byte label) { 
+ 
+  byte buf[256]; 
+  int ret=0; 
+  
+  memset(buf, 0, 256);
+  
+  flog(LOG_WARN, "\t\tTEST WRITE\n"); 
+  
+  print_chain(label, 2); 
+  
+   if ((ret=write_data(label, 2,8192,buf,1)) < 0) { 
+        perror("Write error");   
+      } else 
+        flog(LOG_INFO, "Write %d", ret); 
+  
+  print_chain(label, 2); 
+  
+  
+  flog(LOG_WARN, "\t\tFINE TEST WRITE"); 
+  
+}
+
+
+
+
+
+
+
+/* FUNZIONE READ_DATA ***********************************************************
+ * La funzione read_data scrive il buffer nella catena specificata da           *
+ * chain astraendo il concetto di cluster. La posizione nella catena è data 	*
+ * da offset. Se la funzione ha un offset maggiore dei cluster allocati questa  *
+ * riporta il valore zero							*
+ * 										*
+ * LABEL  : volume sul quale scrivere						*
+ * CHAIN  : catena di cluster coinvolta nella lettura				*
+ * OFFSET : posizione su cui scrivere						*
+ * BUF    : buffer di output							* 
+ * SIZE   : grandezza del buffer da leggere					*
+ * 										*
+ * Se tutto la scrittura ha avuto successo ritorna il numero di byte scritti, 	*
+ * altrimenti ritorna -1.							*
+ ********************************************************************************/
+
+
+int read_data(byte label , dword chain, lword offset,  byte * buf, dword size) { 
+  
+  TABELLA_VOLUMI * part=NULL; 
+  dword size_cluster_byte=0; 
+  dword  offset_cluster_first=0, offset_cluster_last=0, n_cluster=0, n_load_cluster=0; 
+  dword i=0; 
+  dword temp_chain=chain, settore=0, n_settori=0,resto_cluster=0;
+  byte *cluster=NULL; 
+  fat_ptr fat=NULL; 
+  lword n_read=0; 
+  
+  
+  
+  //verifico i parametri
+  if ( chain <2  || buf==NULL || size <0) {
+      set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+      return -EINVAL;
+  }
+  
+  // non è un errore
+  if ( size == 0) { 
+    reset_errno(); 
+    return 0; 
+  }
+  //verifico il volume
+  if (!(part=get_volume(label))) {
+      set_errno(EINVAL,"Volume errato (%s-line%d)", __FILE__, __LINE__); 
+      return -EINVAL;
+  }
+
+  //verifico la catena 
+  if (!get_next_fat(part->fat, chain)) {
+      set_errno(EINVAL,"Chain errato (%s-line%d)", __FILE__, __LINE__); 
+      return -EINVAL;
+  }
+  
+  // grandezza cluster ( varia tra disco e disco) 
+  size_cluster_byte=part->fat_info.sectors_for_cluster*part->fat_info.byts_for_sector; 
+  fat=part->fat; 
+  
+  // alloco grandezza cluster 
+  if(!(cluster=mem_alloc(size_cluster_byte,1))){
+    set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+    return -ENOMEM; 
+  }
+  
+  memset(cluster,0, size_cluster_byte);
+  
+  // calcoliamo quanti cluster dobbiamo scorrere prima di trovare quello che serve a noi 
+  n_cluster= offset/size_cluster_byte;
+  // calcolo l'offset che mi interessa all'interno di un cluster 
+  offset_cluster_first= offset%size_cluster_byte; 
+    //calcolo l'offset che mi interessa sull'ultimo cluster 
+   offset_cluster_last=(size%size_cluster_byte+offset_cluster_first)%size_cluster_byte;
+  // calcolo quanto spazio rimane nel primo cluster a partire da offset 
+  resto_cluster= size_cluster_byte - (offset_cluster_first);
+  //calcoliamo quanti cluster caricare in memoria 
+  n_load_cluster=((offset_cluster_first+size)/size_cluster_byte) + (((offset_cluster_first+size)%size_cluster_byte)?1:0); 
+  // salvo il numero di settori di cui è composto un cluster 
+  n_settori=part->fat_info.sectors_for_cluster;
+
+  
+ //Scorre finché non trovo il primo cluster coinvolto nella lettura
+  for ( i=0; i< n_cluster; i++) {
+      if(!(temp_chain=get_next_fat(fat,temp_chain))){  
+	set_errno(EINVAL,"Offset errato o chain corrotta (%s-line%d)", __FILE__, __LINE__); 
+	mem_free(cluster);
+	return -EINVAL; 
+      }
+  }
+ 
+#ifdef DEBUG_FS
+  flog(LOG_DEBUG, "Primo cluster : %d", temp_chain);
+  flog(LOG_DEBUG, "Size Cluster : %x", size_cluster_byte); 
+  flog(LOG_DEBUG, "n_load_cluster : %d", n_load_cluster);    
+  flog(LOG_DEBUG, "Offset first : %d", offset_cluster_first); 
+  flog(LOG_DEBUG, "Resto : %d", resto_cluster); 
+  flog(LOG_DEBUG, "Offset last : %d", offset_cluster_last); 
+#endif
+  
+ 
+  //Su temp_chain ho il primo cluster coinvolto nella lettura    
+  for (  i=0; i< n_load_cluster; i++)  {
+    
+        // calcolo il settore poiché il driver lavora sui settori 
+      if ( temp_chain !=0 && temp_chain != EOC_32) 
+	settore=FirstDataSectorOfCluster(temp_chain, part->fat_info.sectors_for_cluster, part->fat_info.first_set_data); 
+      else {
+	    mem_free(cluster);
+	    return n_read;
+      }
+      
+      // chiamo il driver
+      read_part_n(part->ata, part->disco, part->indice_partizione, settore, n_settori, (void *) cluster); 
+	 
+      // il primo è l'ultimo vanno trattati in modo diverso 
+
+      //PRIMO
+      if (i==0) { // primo 
+
+	  if ( size > resto_cluster) {
+	    // carico parte del buffer richiesto  la seconda parte verrà caricata da un altra interazione 
+	    memcpy(buf, (cluster+offset_cluster_first), resto_cluster); 
+	    n_read+=resto_cluster;
+	    buf+=resto_cluster;
+	  }else  {
+	    // carico tutto il buffer richiesto
+	    memcpy(buf, (cluster+offset_cluster_first), size);
+	    n_read+=size;
+	    buf+=size; 
+	  }
+	    //ULTIMO
+      } else if ( i==(n_load_cluster -1)) {  
+	    // copio la parte rimanente 
+	    memcpy(buf, cluster, offset_cluster_last);
+	    n_read+=offset_cluster_last;
+	    buf+=offset_cluster_last; 
+      }
+	else { //restanti 
+	  memcpy(buf, cluster, size_cluster_byte);
+	  buf+=size_cluster_byte;
+	  n_read+=size_cluster_byte;
+	}
+      
+    // prelevo il successivo 
+    if (!(temp_chain= get_next_fat(fat, temp_chain)))  {
+	mem_free(cluster);
+	return -1; 
+    }
+    
+  }//for
+
+  mem_free(cluster);
+  return n_read; 
+  
+}
+
+
+
+// funzione che legge buf dal volume label sulla catena chain 
+/* label partizione 
+ * chain catena che rapresenta un file 
+ * offset posizioni all'interno della catena 
+ * buf posizione nel quale inserire il buff 
+ * grandezza del buffer 
+ * la funzione deve finire quando sono stati caricati tutti i cluster nel buffer 
+ * se cosi non fosse significa che è andato male qualcosa 
+ * la funzione puo leggere meno byte di quelli passati 
+ * se questo accade riporta il numero di byte letti e
+ * se è zero suiamo alla fine 
+*/ 
+
+
+
+
+
+
+
+
+BOOL test_read ( byte label) {
+ 
+  byte  *buf=NULL;
+  buf=mem_alloc(1024,1); 
+  int i=0, n_read; 
+  
+  n_read=read_data('C', 2,4096,buf,1024); 
+  
+  if (n_read<0)
+      perror("read"); 
+    
+  flog(LOG_DEBUG,"\tREAD %d ", n_read); 
+  
+  
+}
+
+/* funzione di test *
+
+#define S 10000
+
+BOOL test_read ( byte label) {
+  
+  dword chain = 0, i=0,t=0, j=0,n=0; 
+  byte* buf=mem_alloc(S, 1); 
+  byte* b= mem_alloc(S,1);
+  byte nome[100]; 
+  TABELLA_VOLUMI * tab=get_volume('C'); 
+  lword off=0; 
+  memset(buf, 1, S); 
+  memset(b, 0, S); 
+  dword temp=0; 
+  
+  flog(LOG_WARN, "Test DATA OBJECT "); 
+ 
+  // creiamo un catena ( elementi 1 ) 
+  if(!create_fat('C',&chain)) {
+    perror("Creazione chain fallita"); 
+    return FALSE; 
+  } 
+  
+ // scrivo 10000 byte con offset 3000  usa 4 cluster 
+ // quindi ne crea 3 
+ // 1096 4096 4096 712
+  if(!(write_data('C', chain, 3000, buf,S))) { 
+    perror("Errore scrittura"); 
+    delete_all_fat('C', chain);
+    return FALSE; 
+  }
+  
+  t=chain; 
+    do {
+	flog(LOG_DEBUG, "Elemento : %d", t);
+	if(!(t=get_next_fat(tab->fat, t))) {
+	  perror("Errore lettura ");
+	  break; 
+	}
+    } while( !isLast_fat(t)); 
+ 
+  
+  
+  if(!(read_data('C', chain,3000, b, S))) {
+    perror("Errore lettura"); 
+    delete_all_fat('C', chain);
+    return FALSE;
+  }
+ 
+  for ( i=0; i< S; i++) 
+      if ( buf[i]!=b[i]) {
+	   flog(LOG_WARN, "Buffer diversi %d %x != %x" ,i,  buf[i], b[i]);  
+	  break;
+      }
+      
+  flog(LOG_WARN, "Buffer uguali"); 
+  
+ 
+  if(!(delete_all_fat('C',chain))) {
+      perror("Eliminzazione chain fattila"); 
+      return FALSE; 
+  }
+  
+  
+  
+  
+  if(!create_fat('C',&chain)) {
+    perror("Creazione chain fallita"); 
+    return FALSE; 
+  } 
+  
+
+ 
+ 
+ // scrivo 10000 byte con offset 3000  usa 4 cluster 
+ // 1096 4096 4096 712
+  if(!(write_data('C', chain, 3000, buf,S))) { 
+    perror("Errore scrittura"); 
+    delete_all_fat('C', chain);
+    return FALSE; 
+  }
+ 
+ 
+  if(!(read_data('C', chain,3000, b, S))) {
+    perror("Errore lettura"); 
+    delete_all_fat('C', chain);
+    return FALSE;
+  }
+ 
+  for ( i=0; i< S; i++) 
+      if ( buf[i]!=b[i]) {
+	   flog(LOG_WARN, "Buffer diversi %d %x != %x" ,i,  buf[i], b[i]);  
+	  break;
+      }
+      
+  flog(LOG_WARN, "Buffer uguali"); 
+
+  memset(buf, 1, S); 
+  memset(b, 0, S); 
+   
+ // scrivo 10000 byte con offset 5000  usa 3 cluster 
+ // non crea ulteriori cluster 
+ // 3192 4096 2712
+  if(!(write_data('C', chain, 5000, buf,S))) { 
+    perror("Errore scrittura"); 
+    delete_all_fat('C', chain);
+    return FALSE; 
+  }
+ 
+
+  if(!(read_data('C', chain,5000, b, S))) {
+    perror("Errore lettura"); 
+    delete_all_fat('C', chain);
+    return FALSE;
+  }
+ 
+  for ( i=0; i< S; i++) 
+      if ( buf[i]!=b[i]) {
+	   flog(LOG_WARN, "Buffer diversi %d %x != %x" ,i,  buf[i], b[i]);  
+	  break;
+      }
+      
+  flog(LOG_WARN, "Buffer uguali"); 
+  
+  // ingrandisco i buffer ma la catena rimane la stessa 
+  mem_free(buf);
+  mem_free(b);
+  buf=mem_alloc(S+5000, 1); 
+  b=mem_alloc(S+5000,1);
+  memset(buf, 1, S+5000); 
+  memset(b, 0, S+5000); 
+  
+   if(!(write_data('C', chain, 5000, buf,S+5000))) { 
+    perror("Errore scrittura"); 
+    delete_all_fat('C', chain);
+    return FALSE; 
+  }
+ 
+
+  if(!(read_data('C', chain,5000, b, S+5000))) {
+    perror("Errore lettura"); 
+    delete_all_fat('C', chain);
+    return FALSE;
+  }
+ 
+  for ( i=0; i< S+5000; i++) 
+      if ( buf[i]!=b[i]) {
+	   flog(LOG_WARN, "Buffer diversi %d %x != %x" ,i,  buf[i], b[i]);  
+	  break;
+      }
+      
+  flog(LOG_WARN, "Buffer uguali"); 
+  
+  
+  // STAMPO LA CATENA 
+  t=chain; 
+    do {
+	flog(LOG_DEBUG, "Elemento : %d", t);
+	if(!(t=get_next_fat(tab->fat, t))) {
+	  perror("Errore lettura ");
+	  break; 
+	}
+    } while( !isLast_fat(t)); 
+ 
+  
+  
+   if(!delete_all_fat('C', chain)) { 
+      perror("Errore delete"); 
+      return FALSE;
+  }
+  
+  mem_free(buf);
+  mem_free(b);
+  
+  /* FINE TEST GROSSI BUFFER */
+  
+  /* Test piccoli buffer subdoli *
+   
+  if(!create_fat('C',&chain)) {
+    perror("Creazione chain fallita"); 
+    return FALSE; 
+  } 
+  
+  /*semplice test *
+  
+  memset(nome,'a', 100); 
+  strncpy((char*)nome, "giuseppe",8);
+      
+   if(!(write_data('C', chain,0, nome,8))) { 
+    perror("Errore scrittura"); 
+    delete_all_fat('C', chain);
+    return FALSE; 
+  }
+
+  memset(nome,0, 100); 
+  if(!(read_data('C', chain,0, nome, 8))) {
+    perror("Errore lettura"); 
+    delete_all_fat('C', chain);
+    return FALSE;
+  }
+   
+  flog(LOG_DEBUG, "Nome : %s", nome); 
+  
+  /* test a cavallo di due cluster
+   * uno deve essere creato  *
+  
+  memset(nome,'a', 100); 
+  strncpy((char*)nome, "giuseppe",8);
+      
+   if(!(write_data('C', chain, 4094, nome,8))) { 
+    perror("Errore scrittura"); 
+    delete_all_fat('C', chain);
+    return FALSE; 
+  }
+ 
+   memset(nome,0, 100); 
+  if(!(read_data('C', chain,4094, nome, 8))) {
+    perror("Errore lettura"); 
+    delete_all_fat('C', chain);
+    return FALSE;
+  }
+  
+  flog(LOG_DEBUG, "Nome : %s", nome);  
+  
+  // altro test a cavallo di due cluster ma senza creazione di nuovi cluster 
+   
+  memset(nome,'a', 100); 
+  strncpy((char*)nome, "giuseppe",8);
+      
+   if(!(write_data('C', chain, 4089, nome,8))) { 
+    perror("Errore scrittura"); 
+    delete_all_fat('C', chain);
+    return FALSE; 
+  }
+   memset(nome,0, 100); 
+  if(!(read_data('C', chain,4089, nome, 8))) {
+    perror("Errore lettura"); 
+    delete_all_fat('C', chain);
+    return FALSE;
+  }
+  flog(LOG_DEBUG, "Nome : %s", nome);  
+  
+   
+ if(!delete_all_fat('C', chain)) { 
+      perror("Errore delete"); 
+      return FALSE;
+  }
+ 
+  /*fine Test piccoli buffer */ 
+  
+  
+  /***************************** test di scrittura e lettura  di 20MB *********
+  buf=mem_alloc(S,1); 
+  memset(buf, 'G', S);
+  off=0;
+ 
+  if(!create_fat('C',&chain)) {
+    perror("Creazione chain fallita"); 
+    return FALSE; 
+  } 
+  temp=chain; 
+  
+  flog(LOG_WARN, "Inizio scrittura 20 MB" ); 
+  
+  for ( i=0; i < 200 ; i++) {
+	if(!write_data('C', chain, off,buf, S)) {
+	  perror("Scrittura");
+	  break;
+	}
+	off+=S; 
+  }
+
+  flog(LOG_DEBUG, "Ho scritto %d ", off); 
+  flog(LOG_WARN, "Fine scrittura 20 MB "  ); 
+  
+  flog(LOG_WARN, "Inizio FAT 20 MB" ); 
+  
+  t=chain; j=0;
+    do {
+//	flog(LOG_DEBUG, "Elemento : %d", t);
+	j++;
+	if(!(t=get_next_fat(tab->fat, t))) {
+	  perror("Errore lettura ");
+	  break; 
+	}
+    } while( !isLast_fat(t)); 
+   flog(LOG_DEBUG, "La FAT ha %d ", j); 
+  flog(LOG_WARN, "Fine FAT 20 MB" ); 
+  
+  
+  flog(LOG_WARN, "Inizio lettura 20 MB" ); 
+ // flog(LOG_WARN, "Inizio lettura %d %d", chain, temp ); 
+  off=0; 
+  for ( i=0; i < 200 ; i++) {
+	 memset(buf, 0, S);
+	//flog(LOG_WARN, "%d", i); 
+	 if(!read_data('C', chain, off,buf, S)) {
+	  perror("Lettura");
+	  break;
+	}
+	off+=S; 
+	
+      for( j=0; j < S ; j++) {
+	if(buf[j]!='G') {
+	    flog(LOG_WARN,"ERRORE LETTERA NON COINCIDENTE %d ",j); 
+	    break;
+	}
+      }
+    
+}
+  flog(LOG_DEBUG, "Ho letto %d ", off); 
+  flog(LOG_WARN, "Fine lettura 20 MB" ); 
+  
+  if(!delete_all_fat('C', chain)) { 
+      perror("Errore delete"); 
+      return FALSE;
+  }
+  mem_free(buf); 
+  / ***************************************fine test di scrittura di 20MB 
+  
+  // facciamo un po di test sui parametri 
+  
+   if(!create_fat('C',&chain)) {
+    perror("Creazione chain fallita"); 
+    return FALSE; 
+  } 
+  buf=mem_alloc(100,1);
+  // la catena è formata da 1 cluster ma l'offset punta al secondo
+  // questa funzione deve fallire
+  
+  // questa deve fallire 
+   if(!read_data(label, chain,4096,buf,10)) 
+     perror("READ"); 
+  
+   buf[0]='1'; 
+   buf[1]='o'; 
+   
+     if(!write_data(label, chain, 4094 ,buf,2))
+     perror("WRITE"); 
+   
+   
+   // questa deve fallire 
+   if(!read_data(label, chain,4094,buf,10)) 
+     perror("READ"); 
+   
+   
+  flog(LOG_WARN, "%s", buf); 
+  
+  memset(buf,0,100);
+  strncpy((void*)buf,"giuseppe", 8);
+   // questa deve avere successo 
+  if(!write_data(label, chain, 4096 ,buf,10))
+     perror("WRITE"); 
+  // successo 
+  if(!read_data(label, chain,4096,buf,10)) 
+     perror("READ"); 
+  
+  flog(LOG_WARN, "%s", buf); 
+  
+  // queste devono fallire
+  
+  if(!write_data(label, chain, 15000,buf,10)) 
+     perror("WRITE"); 
+  
+  if(!read_data(label, chain, 15000,buf,10)) 
+     perror("READ"); 
+  
+  // le funzioni vengono bloccate dalla get_next che verifica
+  // la consistenza della catena 
+  
+   // devo fare i test con i ciclci  
+   mem_free(buf);
+   buf=mem_alloc(10000,1);
+   memset(buf,1,10000); 
+   
+   if(!write_data(label, chain, 0,buf,10000))
+     perror("WRITE"); 
+   
+    memset(buf,0,10000); 
+   j=0; 
+   n=0; 
+   
+  
+   while((n=read_data(label,chain,j,buf,1000))) {
+    j+=n;
+      flog(LOG_DEBUG, "Ho letto %d", n); 
+      for(i=0;i<n;i++)
+	if(buf[i]!=1) 
+	  flog(LOG_WARN, "ERRORE"); 
+   }
+   
+    
+    if(!delete_all_fat('C', chain)) { 
+      perror("Errore delete"); 
+      return FALSE;
+  }
+  *
+  
+  
+   while((n=read_data(label,chain,j,buf,1000))) {
+    j+=n;
+      flog(LOG_DEBUG, "Ho letto %d", n); 
+      for(i=0;i<n;i++)
+	if(buf[i]!=1) 
+	  flog(LOG_WARN, "ERRORE"); 
+   }
+  
+  
+  
+  return TRUE; 
+  
+}
+*/
+#include "direntry.h" 
+#include "string.h" 
+#include "errno.h"
+#include "data.h"
+#include "fat.h" 
+#include "sistema.h"
+#include "wchar.h"
+#include "fs.h"
+#include "volumi.h" 
+#include "system_call.h" 
+
+char dot[MSDOS_NAME+1]   =".          \0"; 
+char dotdot[MSDOS_NAME+1]="..         \0";
+extern TABELLA_VOLUMI * tabella; 
+
+/*FUNZIONI DI INTERFACIA*/ 
+
+// crea un entry sulla cartella father e salva sul contenuto su new che viene creato
+BOOL create_entry(const char * name , byte type,  const FCB * father, FCB * new);  
+// crea new e carica i valori della direntry cercata
+BOOL open_entry(const char * name , const FCB * father, FCB * new);  
+//elimina direnetry
+BOOL delete_entry( const FCB *);  
+
+void print_short_entry(SHORT_ENTRY * s);
+
+void split_dword (const dword value, word * low, word * high) {
+
+        *low=(word)(value&0x0000FFFF);
+        *high=(word)((value&0xFFFF0000)>>16);
+};
+
+void merge_dword(dword * value, const word low , const word high) {
+
+        *value=((dword)(high)<<16) | (dword)(low);
+
+};
+
+
+
+
+
+
+int _ii_;
+
+#define print(buf,size) for(_ii_=0; _ii_ < size; _ii_++) flog(LOG_DEBUG,"%d %x", _ii_, buf[_ii_]);
+
+//macro che unisce due word
+#define merge(hi,lo) ((dword)hi<<16 | (dword)lo)
+
+/*PRIVATE*/
+BOOL create_short_entry( const char * name, SHORT_ENTRY * entry); 
+BOOL create_long_entry(const char * name, LONG_ENTRY *entry);
+BOOL to_msdos_time ( dword sys_time, msdos_time *time );
+BOOL to_msdos_date ( dword sys_date, msdos_date *date );
+BOOL search_entry( dword chain, const  char * name); 
+long int search_entry_short ( byte label , dword chain , const char * name );
+long int search_entry_long  ( byte label, dword chain, const wchar* name, char** );
+int create_shortname(byte label, dword dir, const char* uname, int ulen, char* name_res);
+BOOL search_name ( byte volume, dword cluster, const char * name);
+
+
+BOOL format_short_entry( const char * name, SHORT_ENTRY * entry, byte type);
+
+BOOL format_long_entry(const char* name, LONG_ENTRY* entry, byte n, byte chkSum);
+
+
+ 
+BOOL format_directory(FCB* fcb) {
+  
+  char * buf=0; 
+  SHORT_ENTRY dot_entry , dotdot_entry, temp; 
+  dword first_cluster=0; 
+  dword father_cluster=0; 
+  word low=0, high=0; 
+  TABELLA_VOLUMI*tab=0; 
+  size_t size=0; 
+  dword offset=0;
+  
+  
+   flog(LOG_WARN, "DIRECTORY"); 
+  
+  if ( !fcb) { 
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return FALSE; 
+  }
+  flog(LOG_WARN, "DIRECTORY"); 
+  if(!(tab=get_volume(fcb->volume))){ 
+    set_errno(EINVAL,"Volume errato (%s-line%d)", __FILE__, __LINE__); 
+    return FALSE; 
+  }
+  flog(LOG_WARN, "DIRECTORY"); 
+ size=tab->fat_info.byts_for_sector*tab->fat_info.sectors_for_cluster;
+ 
+  // alloco grandezza cluster 
+  if(!(buf=mem_alloc(size,1))){
+    set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+    return FALSE; 
+  }
+  
+  flog(LOG_WARN, "DIRECTORY"); 
+  memset(buf, 0, size); 
+  memset(&dot_entry,0, sizeof(SHORT_ENTRY)); 
+  memset(&dotdot_entry,0,sizeof(SHORT_ENTRY));    
+  memset(&temp,0,sizeof(SHORT_ENTRY)); 
+  
+  flog(LOG_WARN, "SEMAF %d", tab->semaphore); 
+  
+   if (!create_fat(fcb->volume, &first_cluster)) { 
+     perror("CREATE_FAT"); 
+     mem_free(buf);  
+   }else {
+      flog(LOG_WARN,"Ho creato %d ",first_cluster); 
+   }
+   
+  fcb->cluster=first_cluster; 
+  offset=fcb->offset_father + SIZE_ENTRY*(fcb->n_entry-1);
+  
+  //inserisco il cluster nell'entry appena creata 
+   if ((read_data(fcb->volume,fcb->cluster_father,offset, (void*)&temp,sizeof(SHORT_ENTRY))) < 0 ) {
+    perror("WRITE"); 
+    set_errno(4, "Read  (%s-line%d)", __FILE__, __LINE__); 
+      mem_free(buf); 
+    return FALSE; 
+ }
+  
+  split_dword (fcb->cluster, &low,&high);
+  temp.DIR_FstClusHI=high; 
+  temp.DIR_FstClusLO=low; 
+  temp.DIR_FileSize=0; 
+  
+  if ((write_data(fcb->volume,fcb->cluster_father,offset ,(void*)&temp,sizeof(SHORT_ENTRY))) < 0 ) {
+    perror("WRITE"); 
+    set_errno(4, "write  (%s-line%d)", __FILE__, __LINE__); 
+      mem_free(buf); 
+    return FALSE; 
+ }
+  
+ 
+ 
+  
+  flog(LOG_WARN,"CLUSTER %d CLUSTER FATHER %d ", fcb->cluster, fcb->cluster_father); 
+  
+  
+  format_short_entry(dot, &dot_entry, ATTR_DIRECTORY); 
+  format_short_entry(dotdot, &dotdot_entry, ATTR_DIRECTORY); 
+  
+  split_dword (fcb->cluster, &low,&high);
+  dot_entry.DIR_FstClusHI=high; 
+  dot_entry.DIR_FstClusLO=low; 
+  dot_entry.DIR_FileSize=0; 
+  
+  split_dword (fcb->cluster_father, &low,&high);
+  dotdot_entry.DIR_FstClusHI=high; 
+  dotdot_entry.DIR_FstClusLO=low; 
+  dot_entry.DIR_FileSize=0;
+  
+  
+  print_short_entry((SHORT_ENTRY*)&dot_entry);
+  print_short_entry((SHORT_ENTRY*)&dotdot_entry);
+  
+  //inserisco i campi nel buffer 
+   memcpy(buf, &dot_entry, sizeof(SHORT_ENTRY));
+   memcpy((buf+sizeof(SHORT_ENTRY)),&dotdot_entry, sizeof(SHORT_ENTRY));
+  
+  if ((write_data(fcb->volume,fcb->cluster, 0,buf,size)) < 0 ) {
+    perror("WRITE"); 
+    set_errno(4, "write  (%s-line%d)", __FILE__, __LINE__); 
+    return FALSE; 
+ }
+  
+  flog(LOG_DEBUG, "SCRITTURA DOT terminata "); 
+ 
+  
+  return TRUE;
+}
+
+
+
+
+
+
+inline word get_n_entry(const char * str) { 
+ 
+ size_t size=strlen(str); 
+  word n=0; 
+  
+  n=size/SIZE_NAME_PART; 
+  if(size%SIZE_NAME_PART) 
+    n++;
+  n++; // c'è sempre una short entry 
+  
+  return n; 
+}
+    
+dword get_time() { 
+ // devo fare l'inserimento dinamico ma mi server sprintf
+	__asm__(" int $0x99 " ); 
+	
+}
+dword get_date(){
+  
+  // devo fare l'inserimento dinamico ma mi server sprintf
+  __asm__("int $0x98 " ); 
+  
+}
+
+byte check_sum ( const  byte * name) { 
+  
+ short i=0; 
+ byte sum=0; 
+ 
+ for ( i=MSDOS_NAME; i !=0; i--) 
+      sum= (( sum & 1) ? 0x80 : 0) + ( sum >> 1) + *name++; 
+ 
+ flog(LOG_DEBUG, "CHECKSUM : %x", sum); 
+ 
+ return sum; 
+}
+
+
+
+ natl random () { 
+ 
+    static lword x=0;
+    x= ((get_time() << 8 ) | get_date()) ; 
+    lword m =4294967296; 
+    lword a =1103515245; 
+    natl c =12345; 
+  
+    x = (a*x +c) % m; 
+  
+    return (natl)x; 
+}
+
+
+
+
+/*FUNZIONE  che formata un buffer pronto per la scruittura sul disco.
+ *Alloca il buffer in memoria dinamica  questo buffer è lo riporta mediante buf*/
+
+BOOL  format_entry (const char *long_name, const char * short_name, byte type, byte ** buf ) { 
+ 
+  word n_entry=0; 
+  LONG_ENTRY *l=NULL; 
+  word i=0,n=0; 
+  char *tmp=NULL;  
+  byte chkSum=0; 
+  n_entry=get_n_entry(long_name); // prelevo il numero di entrate
+  *buf=mem_alloc(n_entry*SIZE_ENTRY, 1); // alloco lo spazio per le strutture
+  l=(LONG_ENTRY*)*buf; 
+  
+  n_entry--;//elimino l'entry short  
+  i=n_entry;
+  n=strlen(long_name); 
+  tmp=(long_name+n); // ultimo
+  tmp=tmp-(n%SIZE_NAME_PART); // punto all'elemento da copiare
+  
+  chkSum=check_sum((byte*)short_name); 
+  
+  
+  for (;n_entry>0; n_entry--, l++, tmp-=SIZE_NAME_PART) {
+    flog(LOG_WARN,"I %d, N_entry %d , checksum %x, value %x",i, n_entry, chkSum, (i==n_entry)? (n_entry|MASK_LAST_NAME):n_entry); 
+    format_long_entry(tmp,l, (i==n_entry)? (n_entry|MASK_LAST_NAME):n_entry, chkSum); 
+  }
+  
+  format_short_entry(short_name, (SHORT_ENTRY*)l, type); 
+  
+  
+  return TRUE; 
+  
+}
+
+
+
+
+BOOL format_short_entry( const char * name, SHORT_ENTRY * entry, byte type){
+  
+  entry->DIR_Attr=type; 
+  entry->DIR_FileSize=0; 
+  entry->DIR_FstClusHI=0;
+  entry->DIR_FstClusLO=0;
+  entry->DIR_NTRes=0; 
+  entry->DIR_CrtTimeTenth=0; // ignoro millisecondi 
+  
+  to_msdos_date(get_date(), (msdos_date*) &entry->DIR_CrtDate); 
+  to_msdos_time(get_time(), (msdos_time*) &entry->DIR_CrtTime);
+  to_msdos_date(get_date(), (msdos_date*) &entry->DIR_WrtDate); 
+  to_msdos_time(get_time(), (msdos_time*) &entry->DIR_WrtTime);
+  
+  memset(entry->DIR_Name,0,MSDOS_NAME); 
+  strncpy(entry->DIR_Name, name, MSDOS_NAME); 
+  
+  
+  return TRUE; 
+}
+
+BOOL format_long_entry(const char * name, LONG_ENTRY *entry, byte n, byte chkSum) {
+  
+ 
+  const char *name1=name; 
+  const char *name2=name+SIZE_UNO; 
+  const char *name3=name2+SIZE_DUE;
+  
+  BOOL salta=FALSE; 
+  
+//  flog(LOG_WARN, "Name %s %d %x",name, n, chkSum); 
+  
+   if (n&0x40) { 
+    
+     dword size=strlen(name); 
+    
+     wmemset(entry->LDIR_Name1, 0xFFFF, SIZE_UNO); 
+     wmemset(entry->LDIR_Name2, 0xFFFF, SIZE_DUE); 
+     wmemset(entry->LDIR_Name3, 0xFFFF, SIZE_TRE);
+     
+     if ( size < SIZE_UNO){
+	char2uni(entry->LDIR_Name1, name1, size);
+	entry->LDIR_Name1[size]=0x0000; 
+	salta=TRUE; 
+     }
+    
+    size-=SIZE_UNO; 
+    
+    if ( size < SIZE_DUE & !salta ){
+        char2uni(entry->LDIR_Name1, name1, SIZE_UNO);
+	char2uni(entry->LDIR_Name2, name2, size);
+	entry->LDIR_Name2[size]=0x0000; 
+	salta=TRUE; 
+    }
+  
+    size-=SIZE_DUE; 
+    
+    if ( size < SIZE_TRE &!salta){
+	char2uni(entry->LDIR_Name1, name1, SIZE_UNO);
+	char2uni(entry->LDIR_Name2, name2, SIZE_DUE);
+	char2uni(entry->LDIR_Name3, name3, size);
+	entry->LDIR_Name3[size]=0x0000; 
+    }
+     
+    
+    if ( size = SIZE_TRE & !salta){
+	char2uni(entry->LDIR_Name1, name1, SIZE_UNO);
+	char2uni(entry->LDIR_Name2, name2, SIZE_DUE);
+	char2uni(entry->LDIR_Name3, name3, SIZE_TRE); 
+     }
+    
+   } else {
+   
+   char2uni(entry->LDIR_Name1, name1, SIZE_UNO);
+   char2uni(entry->LDIR_Name2, name2, SIZE_DUE); 
+   char2uni(entry->LDIR_Name3, name3, SIZE_TRE);
+
+     
+  }
+  
+  
+   entry->LDIR_Attr=ATTR_LONG_NAME; 
+   entry->LDIR_FstClusLO=0; 
+   entry->LDIR_Chksum=chkSum; 
+   entry->LDIR_Type=0; 
+   entry->LDIR_Ord=n; 
+
+   return TRUE;  
+  
+}
+
+
+
+
+
+
+
+
+
+
+/*
+ *Il Nome del file Lo gestiamo come una pila , inseriamo sempre in testa
+ * questo perchè la lista la scorriamo dall'ultimo elemento :
+ * Questa funzione trasforma da unicode as asci (7 bit) il nome salvato
+ * nel disco
+ * NAME :  parte del nome del file UNICODE
+ * BUF     . Buffer del FCB nel qual inseriamo il nome
+ * non faccio nessun controllo sullo spazio  
+*/
+
+
+void append_name (const  LONG_ENTRY * entry, wchar * n ) {
+
+  int i=0, j=0, s=0;  
+  wchar name[SIZE_NAME_PART+1]; 
+  wchar buf[SIZE_NAME]; 
+  BOOL end=FALSE; 
+  dword jiffies=0; 
+  
+  memset(name, 0, (SIZE_NAME_PART+1)*2); 
+  wmemset(buf, 0, SIZE_NAME); 
+  // name 1 ; 
+  for (i=0; i< SIZE_UNO; i++,j++) 
+      if(entry->LDIR_Name1[i]!= PADDING)
+	  name[j]=entry->LDIR_Name1[i]; 
+      else {
+	end=TRUE; 
+	break; 
+      }
+      
+  // name 2 
+	
+  for (i=0; i< SIZE_DUE && !end; i++,j++) 
+      if(entry->LDIR_Name2[i]!= PADDING)
+	  name[j]=entry->LDIR_Name2[i]; 
+       else {
+	end=TRUE; 
+	break; 
+      }
+      
+  // name 3 
+    for (i=0; i< SIZE_TRE & !end; i++,j++) 
+      if(entry->LDIR_Name3[i]!= PADDING)
+	  name[j]=entry->LDIR_Name3[i]; 
+      else 
+	break; 
+      
+   // ora su j ho quanto è lungo lo spazio 
+  // traslo di j
+  
+  s=wcslen(n);
+  
+
+  // se non è il primo 
+  if(!(entry->LDIR_Attr & MASK_LAST_NAME)) {
+    memset(buf, 0, SIZE_NAME*2); 
+    wcsncpy(buf,n, s);	//salvo il nome 
+    wmemset(n, 0,MAX_NAME); 	// reset name 
+    wcsncpy(n+j,buf,s); 
+  }
+  
+ wcsncpy(n,name,j);
+ //print_w(buf); 
+ //flog(LOG_WARN, "Lunghezza %d", wcslen(n));
+
+  return;
+}
+
+
+
+/** FUNZIONE ******************************************************************
+ * Cerca n entrate libere, assumo che quando è presente FREE_ALL , tutti i    *
+ * cluster successivi sono liberi, e non esistono posizioni adiacenti a questa*
+ * con l'eticheta free ( il software che si preocupa di eliminare le entry 	  *
+ * si incarica di fondere le varie zone. 									  *
+ *     N 	   : numero di entry da cercare									  *
+ *     CLUSTER : puntatore alla fat 										  *
+ *	   SIZE    : grandezza di un cluster 									  *
+ * Ritorna offset								  *
+ *****************************************************************************/
+
+
+lword  get_free_entry ( byte label, dword chain, word n) {
+
+
+    SHORT_ENTRY *dir;
+    byte *buf=mem_alloc(SIZE_BUF,1);
+    BOOL end=FALSE; 
+    dword n_read=0,i=0, dir_free=0; 
+    lword offset=0, offset_backup=0; 
+    dword max=SIZE_BUF/SIZE_ENTRY; 
+    
+    
+    TABELLA_VOLUMI * volume=get_volume(label);
+    byte *estensione=NULL; 
+    dword size_cluster= (volume->fat_info.sectors_for_cluster * volume->fat_info.byts_for_sector); 
+    
+     flog(LOG_WARN, "GET ENTRY : %d chain %d volume %c", n, chain, label); 
+    
+    while( !end && (n_read=read_data(label, chain,offset,buf, SIZE_BUF))) {
+    
+    dword number_dir_entry=n_read/SIZE_ENTRY;
+    dir=(SHORT_ENTRY*)buf;
+    i=0; 
+    
+        
+     flog(LOG_WARN, " offset: %d  read %d", offset, n_read); 
+    
+    for ( i=0; i<number_dir_entry; i++, dir++) {
+  
+//       flog(LOG_DEBUG, "I %d  NAME %x free %d ", i,dir->DIR_Name[0], dir_free); 
+      
+        if ( dir->DIR_Name[0]== FREE || dir->DIR_Name[0] == ALL_FREE )
+            dir_free++;
+	else 
+	  dir_free=0; 
+	
+        if ( dir_free==n ){
+	    end=TRUE; 
+	      break; 
+	  }
+      }
+    
+    
+    // se abbiamo finito 
+    flog(LOG_DEBUG, "I %d  free %d  N %d OFFSET %d , OFFSET BACKUP %d", i, dir_free, n, offset, offset_backup);
+      if(end)
+	  if ( (dir_free) > ++i) 	 {
+	      flog(LOG_INFO, "Offset CAVALLO %d " , offset_backup + ( max - (dir_free- i))*SIZE_ENTRY); 
+	      return offset_backup + ( max - (dir_free- i))*SIZE_ENTRY ; 
+	  }else{
+	  
+		
+		flog(LOG_INFO, "READ %d " ,n_read);
+	
+		
+		return offset+(i-dir_free)*SIZE_ENTRY;  
+	  }
+    
+      offset_backup=offset; 
+      offset+=n_read;
+       flog(LOG_WARN, "OFFSET %d , OFFSET BACKUP %d n_read %d", offset, offset_backup, n_read);
+
+        }   
+       
+     // SE NON C'E' DEVO INSERIRE UN CLUSTER VUOTO ( mi serve la grandezza del cluster )
+      if (!n_read ) { // devo appendere un cluster
+	flog(LOG_WARN, "NUOVO cluster.----------------------------------- "); 
+	flog(LOG_WARN,"OFFSET %d SIZE %d free %d ", offset, size_cluster, dir_free);
+	estensione=mem_alloc(size_cluster, 1); 
+	memset(estensione, 0, size_cluster); 
+	write_data(label, chain,offset, estensione, size_cluster); 
+	mem_free(estensione); 
+	return offset-dir_free*SIZE_ENTRY;
+	
+      }
+      
+ 
+     
+  
+    
+ 
+}
+
+
+    
+static const char *reserved3_names[] = {
+	"con     ", "prn     ", "nul     ", "aux     ", NULL
+};
+
+static const char *reserved4_names[] = {
+	"com1    ", "com2    ", "com3    ", "com4    ", "com5    ",
+	"com6    ", "com7    ", "com8    ", "com9    ",
+	"lpt1    ", "lpt2    ", "lpt3    ", "lpt4    ", "lpt5    ",
+	"lpt6    ", "lpt7    ", "lpt8    ", "lpt9    ",
+	NULL };
+
+
+/* Characters that are undesirable in an MS-DOS file name */
+
+static wchar bad_chars[] = {
+	/*  `*'     `?'     `<'    `>'      `|'     `"'     `:'     `/' */
+	0x002A, 0x003F, 0x003C, 0x003E, 0x007C, 0x0022, 0x003A, 0x002F,
+	/*  `\' */
+	0x005C, 0,
+};
+#define IS_BADCHAR(uni)	(vfat_unistrchr(bad_chars, (uni)) != NULL)
+
+static wchar replace_chars[] = {
+	/*  `['     `]'    `;'     `,'     `+'      `=' */
+	0x005B, 0x005D, 0x003B, 0x002C, 0x002B, 0x003D, 0,
+};
+#define IS_REPLACECHAR(uni)	(vfat_unistrchr(replace_chars, (uni)) != NULL)
+
+static wchar skip_chars[] = {
+	/*  `.'     ` ' */
+	0x002E, 0x0020, 0,
+};
+#define IS_SKIPCHAR(uni) \
+	((wchar)(uni) == skip_chars[0] || (wchar)(uni) == skip_chars[1])
+
+static inline wchar *vfat_unistrchr(const wchar *s, const wchar c)
+{
+	for(; *s != c; ++s)
+		if (*s == 0)
+			return NULL;
+	return (wchar *) s;
+}
+
+static inline int vfat_is_used_badchars(const wchar *s, int len)
+{
+	int i;
+	
+	for (i = 0; i < len; i++)
+		if (s[i] < 0x0020 || IS_BADCHAR(s[i]))
+			return -EINVAL;
+	return 0;
+}
+
+
+
+/*NAMEI*/ 
+/*FUNZIONE CHE ANLISZZA I CARATTERI */ 
+
+inline int to_shortname_char( char *buf, char *src,
+				    BOOL *info)
+{
+	int len=1;
+
+	if (IS_SKIPCHAR(*src)) {
+               *info = FALSE;
+//		printf("%C\n", *src); 
+		return 0;
+	}
+	if (IS_REPLACECHAR(*src)) {
+		*info = FALSE;
+		buf[0] = '_';
+		return 1;
+	}
+/*	
+ * Se è un carattere unicode non esprimibile in asci
+ * Elimino questa condizione tanto non si puo verificare 
+ * 
+	len = uni2char(*src, buf); 
+	if (len <= 0) {
+		*info = FALSE;
+		buf[0] = '_';
+		len = 1;
+	} else if (len == 1) {
+		unsigned char prev = buf[0];
+
+		// asci esteso 
+		if (buf[0] >= 0x7F) {
+			*info = FALSE;
+		}
+	       
+
+		buf[0] = UPPER(buf[0]);
+		if (isalpha(buf[0])) {
+		  // ho avuto una conversione 
+		  
+		
+		  }*
+
+	} else 
+	  *info=FALSE; 
+	*/
+
+	buf[0]=(char)*src; 
+	
+	//se è un carattere non esprimibile in ASCII BASE 
+	// lo sostituisco???
+	if (buf[0] >= 0x7F) {
+		*info = FALSE;
+ 		buf[0]='_';   //<-------------------- MIA AGGIUNTA 
+	}
+	 buf[0] = UPPER(buf[0]);
+		
+	return len;
+}
+
+/*
+buf[0] = vfat_toupper(nls, buf[0]);
+		if (isalpha(buf[0])) {
+			if (buf[0] == prev)
+				info->lower = 0;
+			else
+				info->upper = 0;
+		}
+	} else {
+		info->lower = 0;
+		info->upper = 0;
+	}
+	
+	return len;
+*
+
+
+static inline unsigned char
+shortname_info_to_lcase(struct shortname_info *base,
+			struct shortname_info *ext)
+{
+	unsigned char lcase = 0;
+
+	if (base->valid && ext->valid) {
+		if (!base->upper && base->lower && (ext->lower || ext->upper))
+			lcase |= CASE_LOWER_BASE;
+		if (!ext->upper && ext->lower && (base->lower || base->upper))
+			lcase |= CASE_LOWER_EXT;
+	}
+
+	return lcase;
+}
+*/
+#define S 6
+
+char *nomi[S]= { "A       TXT", 
+		 "AA      TXT", 
+		 "A          ", 
+		 "A~1     TXT",
+		 "A~2     TXT",
+		 "THEQUI~1FOX",
+};
+
+
+int find (char * name ) { 
+
+  int i=0; 
+
+  for (i=0; i <S; i++) 
+    if(!strncmp(name, nomi[i], 11))
+      return 0; 
+  return -1; 
+  
+}
+
+
+/*
+ * Givecn a valid longname, create a unique shortname.  Make sure the
+ * shortname does not exist
+ * Returns negative number on error, 0 for a normal
+ * return, and 1 for valid shortname
+ */
+
+#define NLS_MAX_CHARSET_SIZE 260
+
+/* uname unico de name 
+ * ulen lunghezza unicode 
+ * name res 
+ */
+
+int create_shortname(byte label, dword dir,  const  char *uname, int ulen,   char *name_res)
+{
+	char *ip, *ext_start, *end, *name_start;
+	unsigned char base[9], ext[4], buf[8], *p;
+	unsigned char charbuf[NLS_MAX_CHARSET_SIZE];
+	int chl, chi;
+	int sz = 0, extlen, baselen, i, numtail_baselen, numtail2_baselen;
+	int is_shortname;
+	BOOL  base_info=1, ext_info=1; // se attive devo inserire la tilde 
+	dword jiffies; 
+	
+	is_shortname = 1; // è un nome corto
+
+       /* Now, we need to create a shortname from the long name */
+	ext_start = end = &uname[ulen];
+	while (--ext_start >= uname) {
+     
+		if (*ext_start == 0x2E) { /* is `.' */
+			if (ext_start == end - 1) {
+				sz = ulen;
+				ext_start = NULL;
+			}
+			break;
+		}
+	}
+
+
+
+	if (ext_start == uname - 1) {
+//	        printf("Caso senza estensione"); 
+		sz = ulen;
+		ext_start = NULL;
+	} else if (ext_start) {
+		/*
+		 * Names which start with a dot could be just
+		 * an extension eg. "...test".  In this case Win95
+		 * uses the extension as the name and sets no extension.
+		 */
+		name_start = &uname[0];
+		while (name_start < ext_start) {
+		  if (!IS_SKIPCHAR(*name_start)){
+		     
+				break;
+		  }
+			name_start++;
+		}
+		if (name_start != ext_start) {
+			sz = ext_start - uname;
+			ext_start++;
+		} else {
+			sz = ulen;
+			ext_start=NULL;
+		}
+	}
+
+
+	numtail_baselen = 6;
+	numtail2_baselen = 2;
+	for (baselen = i = 0, p = base, ip = uname; i < sz; i++, ip++) {
+ 
+	        chl = to_shortname_char(charbuf,ip, &base_info);
+
+		if (chl == 0)
+			continue;
+
+		if (baselen < 2 && (baselen + chl) > 2)
+			numtail2_baselen = baselen;
+		if (baselen < 6 && (baselen + chl) > 6)
+			numtail_baselen = baselen;
+		for (chi = 0; chi < chl; chi++){
+			*p++ = charbuf[chi];
+			baselen++;
+			if (baselen >= 8)
+				break;
+		}
+		if (baselen >= 8) {
+			if ((chi < chl - 1) || (ip + 1) - uname < sz)
+				is_shortname = 0;
+			break;
+		}
+	}
+	if (baselen == 0) {
+		return -EINVAL;
+	}
+
+	extlen = 0;
+	if (ext_start) {
+		for (p = ext, ip = ext_start; extlen < 3 && ip < end; ip++) {
+			chl = to_shortname_char(charbuf,
+						ip, &ext_info);
+			if (chl == 0)
+				continue;
+
+			if ((extlen + chl) > 3) {
+				is_shortname = 0;
+				break;
+			}
+			for (chi = 0; chi < chl; chi++) {
+				*p++ = charbuf[chi];
+				extlen++;
+			}
+			if (extlen >= 3) {
+				if (ip + 1 != end)
+					is_shortname = 0;
+				break;
+			}
+		}
+	}
+	ext[extlen] = '\0';
+	base[baselen] = '\0';
+	
+	
+
+	/* Yes, it can happen. ".\xe5" would do it. */
+	if (base[0] == DELETED_FLAG)
+		base[0] = 0x05;
+
+	/* OK, at this point we know that base is not longer than 8 symbols,
+	 * ext is not longer than 3, base is nonempty, both don't contain
+	 * any bad symbols (lowercase transformed to uppercase).
+	 */
+
+	memset(name_res, ' ', MSDOS_NAME);
+	memcpy(name_res, base, baselen);
+	memcpy(name_res + 8, ext, extlen);
+
+	/*
+	 *Se shortaname e la base e l'estensione  del nome sono true controllo che 
+	  non esista gia in il nome se non esiste ritorno true 
+	  BASE INFO : true se non ci sono caratteri non  validi 
+	  EXT INFO  :  true se non ci sono caratteri non  validi
+	 */
+	if (is_shortname && base_info && ext_info) {
+	  	if (search_name(label, dir,(const char*) name_res)) {
+		    set_errno(EEXIST, "FILE gia' esistente"); 
+		    return FALSE;
+		}
+		return TRUE; 
+	} 
+	
+	/*
+
+	if (numtail == 0)
+	  if (vfat_find_form(dir, name_res) < 0)
+		return 0;
+	*/
+	/*
+	 * Try to find a unique extension.  This used to
+	 * iterate through all possibilities sequentially,
+	 * but that gave extremely bad performance.  Windows
+	 * only tries a few cases before using random
+	 * values for part of the base.
+	 */
+
+	if (baselen>6) {
+		baselen = numtail_baselen;
+		name_res[7] = ' ';
+	}
+	name_res[baselen] = '~';
+	for (i = 1; i < 10; i++) {
+		name_res[baselen+1] = i + '0';
+		flog(LOG_WARN, " %s %d ", name_res, i); 
+		if (search_entry_short(label, dir,(const char*) name_res) <0) 	//significa che non è presente
+		  return TRUE;
+	}
+	
+	
+	jiffies=random(); 
+	i =  jiffies & 0xffff;
+	sz = (jiffies >> 16) & 0x7;
+	if (baselen>2) {
+		baselen = numtail2_baselen;
+		name_res[7] = ' ';
+	}
+	name_res[baselen+4] = '~';
+	name_res[baselen+5] = '1' + sz;
+	while (1) {
+		sprintf(buf, "%04X", i);
+		memcpy(&name_res[baselen], buf, 4);
+		if (!search_name(label, dir,(const char*) name_res))
+			break;
+		i -= 11;
+	}
+
+
+
+	return TRUE;
+
+
+}
+
+
+
+
+/*Funzione che valuta la correttezza di un nome */ 
+
+
+BOOL valid_longname(const char *name, int len)
+{
+	const char **reserved, *walk;
+	int baselen;
+
+	if ((len && name[len-1] == ' ') || len >= 256 ||  len < 3 )  {
+	  set_errno(EINVAL, "Parametro non corretto"); 
+	  return FALSE;
+	}
+
+	// Bisogna verificare con quale carattere inizia il nome
+	if ( *name == '.' )  {
+	        set_errno(EINVAL, "Nome non permesso");
+		return FALSE;
+	}
+	
+	  
+	// nomi speciali 
+/*	for (walk = name; *walk != 0 && *walk != '.'; walk++);
+	baselen = walk - name;
+
+	if (baselen == 3) {
+		for (reserved = reserved3_names; *reserved; reserved++) 
+			if (!strnicmp(name,*reserved,baselen)) {
+				set_errno(EINVAL, "Nome non permesso");
+				return FALSE;
+			 }
+	} else if (baselen == 4) {
+		for (reserved = reserved4_names; *reserved; reserved++) {
+			if (!strnicmp(name,*reserved,baselen)){
+				set_errno(EINVAL, "Nome non permesso");
+				return FALSE;
+		}	}
+	}
+*/ 	
+	reset_errno(); 
+	return 1;
+}
+
+
+  
+
+BOOL to_msdos_time ( dword sys_time, msdos_time *time ) { 
+  
+    
+    time->Second=((sys_time & 0x000000FF)&0x1F) / 2;  // coppie di secondi)
+    time->Minutes=((sys_time & 0x0000FF00) >> 8)&0x1F; 
+    time->Hours=((sys_time & 0x00FF0000) >> 16)&0x2F; 
+  
+    return TRUE; 
+}
+
+BOOL to_msdos_date ( dword sys_date, msdos_date * date) {
+
+	date->Day=(sys_date & 0x000000FF)&0x1F; // giorno prelevo 5 bit
+	date->Month=((sys_date & 0x0000FF00) >> 8)&0x0F; //mese 4 bit
+	date->Years=(((sys_date & 0x00FF0000) >> 16)&0xEF)+20; //anno 2000 (msdos 1980)
+  
+      return TRUE; 
+}
+
+
+/********************************************************************************/
+//funzione ceh cerca un entry nell spazio dei nomi corto 
+
+// 0 niente 
+// 1 presente 
+
+long int search_entry_short ( byte label , dword chain , const char * name ) {
+  
+  int n_read=0; 
+  byte *buf=mem_alloc(SIZE_BUF,1);   // SIZE BUF multiplo di 32
+  lword offset=0; 
+  BOOL end=FALSE;
+  long int r=-1; 
+  
+  
+  // leggo finché non finisce la cartella 
+  while(!end && (n_read=read_data(label, chain,offset,buf, SIZE_BUF))) {
+    
+    int i=0, n=n_read/SIZE_ENTRY; 
+    SHORT_ENTRY *entry=(SHORT_ENTRY *)buf; 
+    BOOL long_entry=FALSE; 
+ 
+    
+    if (n%SIZE_ENTRY) { 
+	mem_free(buf); 
+	return -1; 
+    }
+    
+    // analizziamo le varie entry saltando quelle lunghe
+    for ( i=0; i<n; i++, entry++) { 
+	
+	// verifichiamo che l'entrata sia libera o non c'è ne siano piu 
+	if (entry->DIR_Name[0] ==  FREE)	// entry libera
+		continue;
+	if ( entry->DIR_Name[0] ==  ALL_FREE){ // non ci sono piu entry 
+		end=TRUE; 
+		r=-1; 		// non è presente 
+		break; 
+	}
+	      
+// 	flog(LOG_WARN, "I %d E: %x", i, entry->DIR_Name[0]);  
+	     
+	if (entry->DIR_Attr == ATTR_LONG_NAME)  
+	    continue;
+	
+	// ho trovato il nome 
+	if(!strncmp(entry->DIR_Name, name, SIZE_NAME_SHORT)) { 
+	    end=TRUE; 
+	    r=offset+i*SIZE_ENTRY; 
+	    break;
+	}    
+    } 
+    offset+=n_read; 
+    
+  }
+  
+  
+  mem_free(buf); 
+  return r;
+  
+}
+
+/*FUNZIONE analizza soltanto lo spazio dei nomi lungo
+ deve riportarmi l'offset della cartella fondamentale per un corretto funzionamento 
+ */ 
+
+ 
+long int  search_entry_long  ( byte label , dword chain , const wchar * name, char **name_find ) {
+ 
+  int n_read=0; 
+  lword offset_old=0; // mi serve per tenere traccia dell'offsete nel caso di nomi lunghi  
+  byte *buf=NULL;   // SIZE BUF multiplo di 32
+  long long int offset=0; 
+  BOOL end=FALSE;
+  lword r =-1;
+  wchar *name_read=NULL; 
+  
+  if ( name == NULL) 
+    return -1; 
+  
+  if(name_find)
+    *name_find=NULL; 
+  
+  
+  // alloco lo spazio in memoria  
+  name_read=mem_alloc(MAX_NAME*2, 1); 
+  memset(name_read, 0, MAX_NAME*2); 
+  buf=mem_alloc(SIZE_BUF,1); 
+  memset(buf, 0, SIZE_BUF); 
+  print_w(name); 
+
+  // leggo finché non finisce la cartella 
+  while( !end && (n_read=read_data(label, chain,offset,buf, SIZE_BUF))) {
+    
+    int i=0, n=n_read/SIZE_ENTRY; 
+    LONG_ENTRY *entry=(LONG_ENTRY *)buf; 
+    BOOL long_entry=FALSE; 
+    byte n_char[260];
+    byte *buf_tmp=NULL;
+   
+//       flog(LOG_WARN, "off : %d n :%d read %d", offset, n , n_read); 
+
+      // fondamentale per una corretta gestione dei nomi 
+      // perché il nome si può trovare a cavallo di due letture o più 
+      // per far fronte a questa evenienza uso buffer che mi assicurino 
+      // che qualsiasi nome sia contenuto in due letture quindi mi servono
+      // buffer di minimo 1024 byte 
+      
+     if (n%SIZE_ENTRY) { 
+ 	mem_free(buf); 
+	mem_free(name_read); 
+ 	return FALSE; 
+     }
+    
+   // analizziamo le varie entry saltando quelle corte
+   for ( i=0; i<n; i++, entry++) { 
+
+//      flog(LOG_WARN, " I %d ORD %x ATTR %d" ,i, entry->LDIR_Ord, entry->LDIR_Attr); 
+     
+	if (entry->LDIR_Ord == FREE) 
+	    continue; 
+	else if (entry->LDIR_Ord==ALL_FREE) {
+ 	  flog(LOG_WARN, "FINE    FINE ------------------------------FINE %d off %d, letto %d", i, offset, n_read); 
+	   
+	  end=TRUE; 
+	  r=-1;
+	  break; 
+	} else  if (entry->LDIR_Attr != ATTR_LONG_NAME)  
+	    continue; 
+	
+	
+	// codice che anlizza il nome lungo 
+	// questo si puo trovare a cavallo tra piu buffer ed cluster 
+	// significa che ho trovato l'ultimo elemento di nome lungo 
+	if (entry->LDIR_Attr == ATTR_LONG_NAME && (entry->LDIR_Ord & MASK_LAST_NAME)) {  
+	    
+	  int j=entry->LDIR_Ord & 0x3F; // prelevo il numero di entry     
+	  int ap=0;	// variabile che contiene le restanti entry da analizzare 
+	    
+	    
+	      offset_old=offset+i*SIZE_ENTRY; // salvo l'offset della prima entry
+  
+	//      flog(LOG_WARN, "I %d N %d J %d OLD OFFSET %d BUFFER %d", i, n, j, offset_old,entry); 
+	    
+	      if (  j< 1 || j > 20 ){// errore 
+		mem_free(name_read);
+		mem_free(buf); 
+		return -1; 
+	      }
+	      
+	      
+	      // nel caso in cui il nome si trovi a cavallo di più buffer 
+	      // devo fare un ulteriore operazione di lettura , la con-
+	      // dizione di sopra ci assicura che il buffer si può trovare 
+	      // a cavallo solo due buffer
+	      
+	      if ( (i+j) < n) { // il long non è a cavallo di due buffer 
+		  i+=(j-1); 
+		  for (; j>0; j--, entry++)  {
+  	//	    flog(LOG_WARN, "J %d  %x", j, entry);
+		    append_name(entry,name_read);
+//		    print_w(name_read); 
+		  }
+	         entry--; // devo controllare tt le entry corte perchè una di queste potrebbe contenere un =x00
+	//         flog(LOG_INFO, "%c, %d ", (char)name_read[0], i); 
+// 		  flog(LOG_WARN, "I %d N %d J %d OLD OFFSET %d BUFFER %d", i, n, j, offset_old,entry);
+	      } else { 
+		
+ 		flog(LOG_WARN,"NOME A CAVALLO DI PIU BUFFER "); 
+		
+		// long name a cavallo di più buffer 
+		// assumo che il disco sia in uno stato consistente 
+// 		carico la parte bassa del nome*/
+		ap=n-i; // positivo 
+		// 
+ //		flog(LOG_INFO, "I %d N %d J %d AP %d OLD OFFSET %d", i, n, j, ap,offset_old);
+		for (; ap>0; ap--, j--, entry++) //<--------------------- NOTTA che decremento j--
+ 		    append_name(entry,name_read); 
+// 		print_w(name_read); 
+		// a questo punto ho solamente una metta del nome 
+		    
+		 offset+=n_read;
+		 memset(buf, 0, SIZE_BUF); 
+		 n_read=read_data(label, chain,offset,buf, SIZE_BUF);
+// // 		 flog(LOG_WARN, "OFFSET %d i %d letto %x ", offset, i, n_read ); 
+		  buf_tmp=buf; 
+// 		   for ( i=0; i<32; i++, buf_tmp+=32) 
+// 		  flog(LOG_INFO, "%d) %x", i,*buf_tmp); 
+    
+		 entry=(LONG_ENTRY*)buf; 
+		 ap=j; // parti da leggere 
+		
+		for (; ap>0; ap--, entry++) 
+		    append_name(entry,name_read);
+// 		 print_w(name_read); 
+		 i=j; 			// parto da dove ho lasciato gli indici 
+		 flog(LOG_INFO, "I %d  J %d value %x", i ,j, entry->LDIR_Ord);
+		 
+	      }
+	      
+	      
+	      flog(LOG_DEBUG,"fuorui"); 
+	   }
+
+	  flog(LOG_WARN, "off : %d i %d", offset, i);
+ 	  print_w(name_read); 
+	  if(!wcsicmp(name, name_read)) { 
+	    
+	    if(name_find) {
+	      *name_find=mem_alloc(SIZE_NAME,1); 
+	      memset(*name_find,0, SIZE_NAME); 
+	      uni2char(name_read,*name_find, wcslen(name_read)); 
+	    }
+	    
+	    r=offset_old; 
+	    end=TRUE; 
+	    break; 
+	  }
+	  
+	}
+	 offset+=n_read; // aggiorno l'offset
+  }
+  
+  flog(LOG_INFO,"Uscita search long offset %d, n_read %d", offset, n_read ); 
+  
+  mem_free(name_read);
+  mem_free(buf); 
+  return r;
+  
+}
+
+
+
+void print_short_entry(SHORT_ENTRY * s) {
+  
+  flog(LOG_DEBUG,"Name       %s",s->DIR_Name);  
+  flog(LOG_DEBUG,"Attr       %x",s->DIR_Attr);  
+  flog(LOG_DEBUG,"Nt         %x",s->DIR_NTRes);  
+  flog(LOG_DEBUG,"Time tenth %d",s->DIR_CrtTimeTenth);  
+  flog(LOG_DEBUG,"Crt Time   %d",s->DIR_CrtTime);  
+  flog(LOG_DEBUG,"Crt Date   %d",s->DIR_CrtDate);  
+  flog(LOG_DEBUG,"Lst Date   %d",s->DIR_LstAccDate);  
+  flog(LOG_DEBUG,"HI         %d",s->DIR_FstClusHI);  
+  flog(LOG_DEBUG,"Wrt Date   %d",s->DIR_WrtDate);  
+  flog(LOG_DEBUG,"Wrt Time   %d",s->DIR_WrtTime);  
+  flog(LOG_DEBUG,"Lo         %d",s->DIR_FstClusLO); 
+  flog(LOG_DEBUG,"Size       %d\n",s->DIR_FileSize);  
+  
+}
+
+
+
+void print_long_entry (LONG_ENTRY * l) {
+
+   char Name1[SIZE_UNO+1]; 
+   char Name2[SIZE_DUE+1]; 
+   char Name3[SIZE_TRE+1];
+  
+   memset(Name1,0,SIZE_UNO+1); 
+   memset(Name2,0,SIZE_DUE+1); 
+   memset(Name3,0,SIZE_TRE+1); 
+   
+   uni2char(l->LDIR_Name1, Name1, SIZE_UNO); 
+   uni2char(l->LDIR_Name2, Name2, SIZE_DUE); 
+   uni2char(l->LDIR_Name3, Name3, SIZE_TRE);
+   
+   
+   flog(LOG_DEBUG, "ID    %x", l->LDIR_Ord);
+   flog(LOG_DEBUG, "Name  %s", Name1); 
+   flog(LOG_DEBUG, "Attr  %x", l->LDIR_Attr);
+   flog(LOG_DEBUG, "Type  %x", l->LDIR_Type); 
+   flog(LOG_DEBUG, "CHCK  %x", l->LDIR_Chksum); 
+   flog(LOG_DEBUG, "Name2 %s", Name2); 
+   flog(LOG_DEBUG, "FstLO %x", l->LDIR_FstClusLO); 
+   flog(LOG_DEBUG, "Name3 %s\n", Name3); 
+}
+
+
+
+
+void print_directory ( byte label, dword chain ) {
+  
+  flog(LOG_DEBUG, "DIRECTORY %d\n", chain);
+  int n_read=0; 
+  byte *buf=mem_alloc(SIZE_BUF,1);   // SIZE BUF multiplo di 32
+  lword offset =0; 
+  BOOL end=FALSE; 
+  
+  while(!end && (n_read=read_data(label, chain,offset,buf, SIZE_BUF))) { 
+    
+    int i=0, n=n_read/SIZE_ENTRY; 
+    SHORT_ENTRY *entry=(SHORT_ENTRY *)buf; 
+    BOOL long_entry=FALSE; 
+    offset+=n_read; 
+    
+    if (n%SIZE_ENTRY) { 
+	mem_free(buf); 
+	return ; 
+    }
+    
+    
+    for ( i=0; i<n; i++, entry++) {
+   
+   // flog(LOG_WARN, " I %d VALUE %x ", i, entry->DIR_Name[0]); 
+
+    if (entry->DIR_Name[0] == FREE) 
+	    continue; 
+	else if (entry->DIR_Name[0]==ALL_FREE) {
+	  end=TRUE; 
+	  break; 
+	}else if (entry->DIR_Attr==ATTR_LONG_NAME)  
+	    print_long_entry((LONG_ENTRY*)entry);
+	 else 
+	    print_short_entry((SHORT_ENTRY*)entry);
+    }
+   
+    
+  }
+  
+  return ; 
+    
+}
+
+extern FCB*root; 
+
+
+
+// funzione che inizializza la directory di root 
+
+void init_root_fcb ( byte label) { 
+  
+  root=mem_alloc(sizeof(FCB),1); 
+  
+  memset(root, 0, sizeof(FCB)); 
+  memset(root->name, 0, SIZE_NAME); 
+  root->cluster=2;
+  root->offset_father=0; 
+  root->type=ATTR_DIRECTORY;  
+  root->semaphore=sem_ini(1); 
+  root->volume=label; 
+}
+
+
+
+/* Se presente riporta vero */ 
+
+
+BOOL search_name ( byte volume, dword cluster, const char * name) {
+    
+    int s =strlen(name); 
+    wchar *name_unicode=mem_alloc((s+1)*2,1);  
+    wmemset(name_unicode, 0, s+1);
+    char2uni(name_unicode, name, s); 
+    BOOL r=FALSE; 
+    
+    // RICERCA NELLO SPAZIO DEI NOMI LUNGO 
+    if (search_entry_long(volume, cluster, name_unicode, NULL) >=0) 
+	r=TRUE; 
+    flog(LOG_DEBUG, "R %d", r); 
+    // RICERCA  NELLO SPAZIO DEI NOMI CORTO 
+    if ( !r &&  search_entry_short(volume, cluster, name) >=0) 
+	r=TRUE; 
+
+    flog(LOG_DEBUG, "R %d", r); 
+    
+	if (r)
+	  set_errno(EEXIST, "File exist %s", name);
+	else 
+	  reset_errno(); 
+	
+	return r; 
+}
+
+
+
+
+
+
+
+
+
+/* funzionc ehce crea un entry su father * 
+int create_shortname(byte label, dword dir,   char *uname, int ulen,   char *name_res);
+*/
+
+
+BOOL create_entry(const char * name , byte type,  const FCB * father, FCB * new){ 
+  
+  char name_short[MSDOS_NAME]; 
+  byte *buf=NULL ; 
+  lword off=0; 
+  word free_entry=0; 
+  FCB * tmp=0; 
+  SHORT_ENTRY * short_entry=NULL; 
+  
+  
+  if ( new == NULL || father==NULL) { 
+    set_errno(EINVAL,"Errore paramenti"); 
+    return FALSE; 
+  }
+
+  if ( father->type!=ATTR_DIRECTORY) { 
+     set_errno(EINVAL,"Bad directory"); 
+     return FALSE; 
+  }
+
+  flog(LOG_DEBUG, "NNNNNNNNNNN %s", name); 
+    reset_errno();
+
+  if (!valid_longname(name, strlen(name))) {
+     perror("nome non valido "); 
+     set_errno(EINVAL, "Errore nome non valido"); 
+    return FALSE; 
+  }
+  
+  // verifico che non sia un nome già in uso 
+  if(search_name(father->volume, father->cluster, name))
+    return FALSE; 
+
+
+
+  memset((void*)name_short,0, MSDOS_NAME); 
+ 
+ 
+  if(!create_shortname(father->volume, father->cluster, name, strlen(name), name_short)) 
+    return FALSE; 
+    
+ 
+  format_entry(name, name_short, type, &buf); 
+  free_entry= get_n_entry(name); 
+ 
+#ifdef DEBUG 
+  {
+   SHORT_ENTRY *e=NULL; 
+   e=(SHORT_ENTRY*)buf; 
+   int i=0, n=get_n_entry(name); 
+   
+    flog(LOG_DEBUG, "              DEBUG           "); 
+    for ( i=0; i<n; i++, e++) 	
+	if (e->DIR_Attr==ATTR_LONG_NAME)  
+	    print_long_entry((LONG_ENTRY*)e);
+	 else 
+	    print_short_entry((SHORT_ENTRY*)e);
+    
+    
+    
+  }
+#endif   
+
+  // SCRITTURA NEL DISCO 
+
+  
+  sem_wait(father->semaphore); 
+  
+    off=get_free_entry(father->volume, father->cluster,free_entry); 
+    
+    if((int)off < 0) 
+      flog(LOG_WARN, "NEGATIVO"); 
+    
+    if(!write_data(father->volume, father->cluster, off, buf, free_entry*SIZE_ENTRY)) 
+      perror("ERRORE write"); 
+  
+  sem_signal(father->semaphore); 
+  
+  flog(LOG_DEBUG, "OFFSET RIPORTATO : %d", off); 
+  
+  
+  //*new=mem_alloc(sizeof(FCB), 1);
+  short_entry=( SHORT_ENTRY*)buf + (get_n_entry(name) -1); 
+  tmp=new; 
+  
+  memset(tmp,0, sizeof(FCB)); 
+  memset(tmp->name, 0, MAX_NAME); 
+  
+  //NAME
+  strncpy(tmp->name, name, strlen(name)); 
+
+  //FATHER 
+  
+//  tmp->father=father;			// Puntatore al padre 
+  tmp->offset_father=off; 		// offset all'interno del padre
+  tmp->cluster_father=father->cluster; 	// cluster del padre 
+  tmp->volume=father->volume; 		// volume 
+  tmp->cluster=0; 			// primo cluster  
+  tmp->size=0; 				// grandezza 
+  tmp->type=type; 			// ATTR di tipo 
+  tmp->n_entry=free_entry; 		// n_entry
+  //SEMAPHORE
+  if (type == ATTR_DIRECTORY) 
+      tmp->semaphore=sem_ini(1); 
+
+  
+  // ACCESSI
+  tmp->type=short_entry->DIR_Attr;
+  tmp->CrtTime= short_entry->DIR_CrtTime ;  // ora di creazione 
+  tmp->CrtDate=short_entry->DIR_CrtDate; // data di creazione 
+  tmp->LstAccDate=short_entry->DIR_LstAccDate; // Ultimo accesso
+  tmp->WrtTime=short_entry->DIR_WrtTime;
+  tmp->WrtDate=short_entry->DIR_WrtDate; // data discrittura
+  
+
+  
+  mem_free(buf); 
+  reset_errno();
+
+
+  return TRUE; 
+}
+
+/*Cerca un entry nell cartella corrente 
+ * se non è presente riporta false
+ * la cosa piu importante che dev trovae è l'offset della cartella del padre
+ */ 
+
+
+
+
+BOOL open_entry(const char * name , const FCB * father, FCB * new) {
+
+   FCB*tmp=NULL; 
+   wchar *name_unicode=NULL; 
+   SHORT_ENTRY short_entry; 
+   dword size=strlen(name);
+   lword offset=0; 
+   lword off_short_entry=0; 
+   char *n=NULL; 
+   int i=0; 
+   char *name_read=NULL;
+
+//    flog(LOG_WARN, "Nome %s, lun %d", name,size); 
+   
+   name_unicode=mem_alloc((size+1)*2,1); 
+   wmemset(name_unicode, 0, size+1);
+   char2uni(name_unicode, name, size); 
+   
+   print_w(name_unicode); 
+
+   
+   offset=search_entry_long(father->volume, father->cluster, name_unicode, &name_read); 
+   
+   if((int)offset <0){ 
+     set_errno(ENOENT, "Non presente %s", name); 
+     mem_free(name_unicode); 
+     return FALSE; 
+   }
+#ifdef DEBUG
+   {
+     int n=get_n_entry(name_read); 
+     byte * buf =NULL; 
+     int s = n*SIZE_ENTRY;
+     SHORT_ENTRY *e=0; 
+     
+     buf=mem_alloc(s,1); 
+     flog(LOG_WARN, "Nome letto :%s  offset : %d n : %d ", name_read, offset,n);
+    
+     read_data(root->volume, root->cluster, offset, buf,s);
+      e=(SHORT_ENTRY*)buf; 
+  
+    for ( i=0; i<n; i++, e++) {
+	if (e->DIR_Name[0] == FREE) 
+	    continue; 
+	else if (e->DIR_Name[0]==ALL_FREE) {
+	  break; 
+	}else if (e->DIR_Attr==ATTR_LONG_NAME)  
+	    print_long_entry((LONG_ENTRY*)e);
+	 else 
+	    print_short_entry((SHORT_ENTRY*)e);
+       }
+    
+    
+   }
+ #endif
+
+   //inserisco il nuovo FCB 
+ // new=mem_alloc(sizeof(FCB), 1); 
+  tmp=new; 
+  
+//   if (!tmp) { 
+//       set_errno(ENOMEM, "Memoria Finita"); 
+//       mem_free(name_unicode); 
+//       return FALSE; 
+//       
+//   }
+  // riempio il nuovo fcb 
+  memset(tmp, 0, sizeof(FCB)); 
+  memset(tmp->name, 0, SIZE_NAME); 
+  memset(&short_entry, 0, SIZE_ENTRY); 
+  
+  flog(LOG_WARN, "NONONONON %s", name_read); 
+  
+  strncpy(tmp->name, name_read, strlen(name_read)); 
+  
+   
+  //FATHER 
+ // tmp->father=father;			// FCB father 
+  tmp->offset_father=offset; 		// offset all'interno dell cartella padre
+  tmp->cluster_father=father->cluster;  // first cluster father 
+  tmp->volume=father->volume; 		// volume 
+  tmp->n_entry=get_n_entry(name_read);  // nmero entry presenti nel disco, compresa la short 
+  
+  
+  off_short_entry=tmp->offset_father+(tmp->n_entry-1)*SIZE_ENTRY; 
+  
+  //devo leggere i dati dalla short entry 
+  read_data(tmp->volume, tmp->cluster_father,off_short_entry , (byte*)&short_entry,SIZE_ENTRY);
+ // print_short_entry(&short_entry); 
+  
+  // controollo CHECKSUM				--------------------------------------------fgffffffffff
+  
+  //FIRTST CLUSTER 
+  tmp->cluster=merge(short_entry.DIR_FstClusHI, short_entry.DIR_FstClusLO); 
+  
+  // ACCESSI
+  tmp->type=short_entry.DIR_Attr;
+  tmp->CrtTime= short_entry.DIR_CrtTime ;  // ora di creazione 
+  tmp->CrtDate=short_entry.DIR_CrtDate; // data di creazione 
+  tmp->LstAccDate=short_entry.DIR_LstAccDate; // Ultimo accesso
+  tmp->WrtTime=short_entry.DIR_WrtTime;
+  tmp->WrtDate=short_entry.DIR_WrtDate; // data discrittura
+  
+  //GRANDEZZA
+  tmp->size=short_entry.DIR_FileSize; 
+
+  
+  mem_free(name_unicode); 
+  
+  reset_errno(); 
+  return TRUE; 
+}
+
+
+
+//funzione che elimina un entry dalla memorria e dal disco 
+BOOL delete_entry(const FCB * file) {
+  
+  word size=0;
+  SHORT_ENTRY *entry=NULL;
+  byte * buf=NULL;  
+  int i=0, r=0; 
+
+  
+  if ( file == NULL ) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return FALSE;
+  }
+  
+  if ( !file->volume || !file->cluster_father || !file->n_entry) { 
+    set_errno(EINVAL,"FCb errato (%s-line%d)", __FILE__, __LINE__); 
+    return FALSE;
+  }
+
+  if(!(buf=mem_alloc(size,1))){
+      set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+      return FALSE; 
+    }
+  
+  //devo eliminare la catena 
+  if (file->cluster != 0 ) {
+      if ( file->cluster <=2) { 
+	   set_errno(EINVAL,"Cluster Errato (%s-line%d)", __FILE__, __LINE__); 
+	   mem_free(buf); 
+	   return FALSE;
+      }
+      if (!delete_all_fat(file->volume, file->cluster)) {
+	   perror("DELETE ALL FAT "); 
+	   mem_free(buf); 
+	  return FALSE; 
+      }
+  } 
+  
+  size=file->n_entry*SIZE_ENTRY; 
+  memset(buf,0, size);
+  entry=(SHORT_ENTRY*)buf; 
+  
+  for (i=0; i< file->n_entry;i++, entry++)
+     entry->DIR_Name[0]=DELETED_FLAG;  
+  
+  if (r=write_data(file->volume, file->cluster_father, file->offset_father, buf, size) < 0 ) { 
+      perror("Write data"); 
+      mem_free(buf); 
+      return FALSE; 
+  }
+  
+  mem_free(buf); 
+  return TRUE; 
+}
+
+
+
+
+
+
+void print_fcb ( const FCB * fcb ) {
+
+    flog ( LOG_DEBUG, "Name       :%s" ,fcb->name );
+    flog ( LOG_DEBUG, "Mode       :%x", fcb->mode); 
+    flog ( LOG_DEBUG, "Cluster    :%d", fcb->cluster );
+    flog ( LOG_DEBUG, "Volume     :%c", fcb->volume );
+    flog ( LOG_DEBUG, "Father clu :%d", fcb->cluster_father);
+    flog ( LOG_DEBUG, "Father off :%x", fcb->offset_father); 
+    flog ( LOG_DEBUG, "N entry    :%d", fcb->n_entry );
+    flog ( LOG_DEBUG, "Pos cor    :%d", fcb->pos_corr );
+    flog ( LOG_DEBUG, "Type       :%d", fcb->type);  
+    flog ( LOG_DEBUG, "Size       :%d", fcb->size );
+    flog ( LOG_DEBUG, "Date Crt   :%x", fcb->CrtDate); 
+    flog ( LOG_DEBUG, "Time Crt   :%x", fcb->CrtTime );
+    flog ( LOG_DEBUG, "Wrt  Date  :%x", fcb->WrtDate );
+    flog ( LOG_DEBUG, "Wrt  Time  :%x", fcb->WrtTime); 
+  
+}
+
+
+const char * nome_test[]={"a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "g0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "h0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "i0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "l0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "m0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "n0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",  
+			  "o00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",// 12
+			  "p0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "q0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "r0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "s0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "t0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "u0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "v0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "z0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "y0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "k0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+			  "j0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "aa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "bb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  "cc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+			  };
+
+const char * nome_test2[]={"10000000000000",
+			  "200000000000000000000",
+			  "3000000000000000000000000000"
+			  "40000000000000000000000000000000000",
+			  "50000000000000000000000000000000000000000",
+			  "600000000000000000000000000000000000000000000000",
+			  "700000000000000000000000000000000000000000000000000000",
+			  "80000000000000000000000000000000000000000000000000000000000000",
+			  "110000000000",
+		      "5500000000000000000000000000000000000000GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG00000000000000",
+			  
+			  };
+
+
+
+			  
+			  
+			  
+			  
+			  
+			  
+			  
+			  
+			  
+			  
+			  
+			  
+			  
+
+void test_dir (byte label){
+  
+  FCB speranza; 
+  char *buf; 
+  SHORT_ENTRY *s; 
+  int i=0; 
+  buf=mem_alloc(1024,1);
+  
+  init_root_fcb(label); // inizializzo root
+  
+   flog(LOG_WARN, "cluster %d", get_next_fat(tabella->fat,2));
+   
+
+      for ( i=0; i< 28; i++) {
+        if(!create_entry(nome_test[i], ATTR_ARCHIVE, root, &speranza))
+           perror("Creazione entry"); 
+ 	 // mem_free(speranza); 
+       }
+     
+
+
+  
+      for ( i=0; i< 10; i++) {
+        if(!create_entry(nome_test2[i], ATTR_ARCHIVE, root, &speranza))
+           perror("Creazione entry"); 
+ 	//  mem_free(speranza); 
+       }
+    
+   
+   
+     if(!create_entry("pesss", ATTR_ARCHIVE, root, &speranza))
+          perror("Creazione entry"); 
+  
+    if(!create_entry("giusepppppppppppe", ATTR_ARCHIVE, root, &speranza))
+      perror("Creazione entry"); 
+  
+  
+      
+
+}
+
+ // flog(LOG_WARN, "nome %s", name); 
+
+
+
+
+
+/*
+
+void test_dir ( byte label) {
+ 
+ wchar *name_u=mem_alloc(MAX_NAME,2);  
+ char *name_c=mem_alloc(MAX_NAME,1); 
+ char *a=mem_alloc(1024,1); 
+ char *b=mem_alloc(1024,1); 
+ 
+ char short_name[MSDOS_NAME];
+ 
+  int i=0,r; 
+  
+/*
+ memset(name_u, 0, MAX_NAME*2); 
+ strcpy(name_c, "The quick brown.fox"); 
+ char2uni(name_u, name_c, strlen(name_c)); 
+ print_w(name_u); 
+ r=search_entry_long(label,2,name_u);
+ 
+  if(r<0)
+   flog(LOG_WARN, "Errore"); 
+ else if(r)
+   flog(LOG_WARN, "Nome presente"); 
+ else 
+   flog(LOG_WARN, "Nome assente"); 
+ 
+ memset(name_u, 0, MAX_NAME*2); 
+ strcpy(name_c, "giuseppe"); 
+ char2uni(name_u, name_c, strlen(name_c)); 
+ print_w(name_u); 
+ r=search_entry_long(label,2,name_u);
+ 
+  if(r<0)
+   flog(LOG_WARN, "Errore"); 
+ else if(r)
+   flog(LOG_WARN, "Nome presente"); 
+ else 
+   flog(LOG_WARN, "Nome assente"); 
+ 
+ memset(name_u, 0, MAX_NAME*2); 
+ strcpy(name_c, "the quick brown.fox"); 
+ char2uni(name_u, name_c, strlen(name_c)); 
+ print_w(name_u); 
+ r=search_entry_long(label,2,name_u);
+ if(create_shortname(label, 2, name_u, wcslen(name_u), a) <0)
+    flog(LOG_WARN, " create name Errore"); 
+  
+   flog(LOG_DEBUG, "SHORT :%s",a);  
+  
+  if(r<0)
+   flog(LOG_WARN, "Errore"); 
+ else if(r)
+   flog(LOG_WARN, "Nome presente"); 
+ else 
+   flog(LOG_WARN, "Nome assente"); 
+ 
+ memset(name_u, 0, MAX_NAME*2); 
+ strcpy(name_c, "a.txt"); 
+ char2uni(name_u, name_c, strlen(name_c)); 
+ print_w(name_u); 
+ r=search_entry_long(label,2,name_u);
+ 
+  if(r<0)
+   flog(LOG_WARN, "Errore"); 
+ else if(r)
+   flog(LOG_WARN, "Nome presente"); 
+ else 
+   flog(LOG_WARN, "Nome assente"); 
+ 
+
+  memset(a,0,1024);
+  memset(b,0, 1024);
+
+
+
+  if(create_shortname(label, 2, name_u, wcslen(name_u), a) <0)
+    flog(LOG_WARN, " create name Errore"); 
+  
+  flog(LOG_DEBUG, "SHORT :%s",a);  
+  
+  r=search_entry_short(label,2,a);
+ 
+ if(r<0)
+   flog(LOG_INFO, " r Errore"); 
+ else if(r)
+   flog(LOG_INFO, "Nome presente"); 
+ else 
+   flog(LOG_INFO, "Nome assente"); 
+ 
+ mem_free(a); 
+ mem_free(b); 
+ mem_free(name_c); 
+ mem_free(name_u); 
+ 
+ 
+ { 
+   dword date=get_date(); 
+   dword time=get_time(); 
+   msdos_date d; 
+   msdos_time b; 
+   
+   
+   memset(&d,0, sizeof(d)); 
+   
+   flog(LOG_WARN,"DATE BIOS %x size %d", date, sizeof(d)); 
+   to_msdos_date(date,&d);
+   flog(LOG_WARN,"DATE MSODS %x %x %x", d.Day, d.Month, d.Years); 
+   
+   time=get_time(); 
+  
+   memset(&b,0, sizeof(b)); 
+   
+   flog(LOG_WARN,"TIME BIOS %x size %d", time, sizeof(b)); 
+   to_msdos_time(time,&b);
+   flog(LOG_WARN,"TIME MSODS %x %x %x",b.Hours, b.Minutes, b.Second); 
+   
+   
+ }
+ *
+
+{ 
+//  char s[MSDOS_NAME]; 
+  char * name="The quick brown giuseppe pes.fox"; 
+  byte *buf=NULL; 
+  SHORT_ENTRY *s;
+  lword i=0, r=0; 
+  
+   /*
+  create_shortname('C', 2,  name, strlen(name), s);
+  format_entry(name, s,ATTR_ARCHIVE, &buf); 
+  
+  print_long_entry((LONG_ENTRY*)buf);
+  buf+=32;
+  print_long_entry((LONG_ENTRY*)buf);
+  buf+=32;
+  print_long_entry((LONG_ENTRY*)buf);
+  buf+=32;
+  print_short_entry((SHORT_ENTRY*)buf);
+  *
+  buf=mem_alloc(1024,1); 
+  
+  read_data('C', 2, 0, buf,1024);
+  s=(SHORT_ENTRY*)buf; 
+  
+  for ( i=0; i<1024/32; i++, s++) 
+    flog(LOG_WARN, "%d : %x",i,  s->DIR_Name[0]); 
+   
+  r=get_free_entry('C', 2, 5);
+  
+  flog(LOG_WARN, "r :%d", r); 
+  
+  read_data('C', 2, r ,buf,SIZE_ENTRY*5);
+  
+  s=(SHORT_ENTRY*)buf; 
+  
+  for ( i=0; i<5; i++, s++) 
+    flog(LOG_WARN, "%d : %x",i,  s->DIR_Name[0]); 
+   
+  
+  
+}
+ 
+}
+
+*/
+
+   
+   
+   
+/*****************SCRITTURA LETTURA *************************/
+   
+int read_fcb(FCB*file, void *buf, size_t count){
+  
+  SHORT_ENTRY short_entry; 
+  size_t eff_read=0; 
+  int ret=0, n_read=0; 
+  dword  offset=0; 
+  
+  if ( file == NULL  || buf==NULL || count <0) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  if ( !file->volume || !file->cluster_father ) { 
+    set_errno(EINVAL,"FCb errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  if (!(IS_READ(file->mode) || IS_RDWR(file->mode))) {
+    set_errno(EINVAL,"File non aperto in lettura"); 
+    return -EINVAL;
+  }
+
+  if (file->cluster == 0 ) {
+    reset_errno(); 
+    return 0;
+  }
+   
+  
+  memset(&short_entry, 0, sizeof(SHORT_ENTRY)); 
+  
+  //offset della short entry 
+  offset=file->offset_father +((file->n_entry-1)*SIZE_ENTRY); 
+  // leggo le informazioni presenti nella short_entry
+  if ( (ret=read_data(file->volume, file->cluster_father,offset, (byte*)(&short_entry), sizeof(SHORT_ENTRY))) < 0 ) 
+      return ret; 
+  
+//  print_short_entry(&short_entry);
+  // sto eccedendo la grandezza del file
+  if ( ( file->pos_corr + count ) > file->size)	  
+	 eff_read=file->size-file->pos_corr; 
+  else 
+	 eff_read=count; 
+
+
+            //scrivo il buffer 
+  if ( (n_read=read_data(file->volume,file->cluster, file->pos_corr, buf, eff_read)) < 0 ) {
+      perror("ERRORE read_data"); 
+      return n_read; 
+  }
+  
+  // se più processi usano lo stesso file si possono formare incoerenze ma non danneggiamenti 
+      
+  // aggiorno la short_entry
+  to_msdos_date(get_date(), (msdos_date*) &(short_entry.DIR_LstAccDate)); 
+  //aggiorno la posizione corrente 
+  file->pos_corr+=n_read; 
+ 
+ // print_short_entry(&short_entry);
+  
+   if ( (ret=write_data(file->volume, file->cluster_father, offset, (byte*)&short_entry, sizeof(SHORT_ENTRY))) < 0 ) 
+      return ret; 
+  
+   reset_errno(); 
+   return n_read; 
+  
+}
+
+// funzione che scrive buf sul file aggiornando le varie entri
+
+int  write_fcb(FCB*file, const void *buf, size_t count){
+
+  SHORT_ENTRY short_entry; 
+  int ret=0, n_write=0; 
+  dword new_chain=0, offset=0; 
+  
+  if ( file == NULL  || buf==NULL || count <0) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  if ( !file->volume || !file->cluster_father ) { 
+    set_errno(EINVAL,"FCb errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  if (!(IS_WRITE(file->mode) || IS_RDWR(file->mode))) {
+    set_errno(EINVAL,"File non aperto il scrittura"); 
+    return -EINVAL;
+  }
+  
+  if (file->type == ATTR_DIRECTORY ) {
+    set_errno(EISDIR,"Directory"); 
+    return -EINVAL;
+  }
+    
+  
+  memset(&short_entry, 0, sizeof(SHORT_ENTRY)); 
+  offset=file->offset_father +((file->n_entry-1)*SIZE_ENTRY); 
+  // leggo le informazioni presenti nella short_entry
+  if ( (ret=read_data(file->volume, file->cluster_father,offset, (byte*)(&short_entry), sizeof(SHORT_ENTRY))) < 0 ) 
+      return ret; 
+  
+  print_short_entry(&short_entry);
+  
+  
+  if (!file->cluster) 	// se non è mai stato inizializzato
+      if (!create_fat(file->volume, &new_chain)) {
+	  flog(LOG_WARN, "CHAIN NDNDJNDNDNDNDNDNDNNDNDNDN %d",new_chain); 
+	  return -1; 
+      }  else{
+	word low=0, high=0; 
+	file->cluster=new_chain;
+	split_dword(new_chain,&low,&high);
+	short_entry.DIR_FstClusLO=low; 
+	short_entry.DIR_FstClusHI=high; 
+       }
+       
+          //scrivo il buffer 
+  if ( (n_write=write_data(file->volume,file->cluster, file->pos_corr, buf, count)) < 0 ) {
+      perror("ERRORE write"); 
+      return n_write; 
+  }
+  
+  // se più processi usano lo stesso file si possono formare incoerenze ma non danneggiamenti 
+      
+  // aggiorno la short_entry
+  to_msdos_date(get_date(), (msdos_date*) &(short_entry.DIR_WrtDate)); 
+  to_msdos_date(get_date(), (msdos_date*) &(short_entry.DIR_LstAccDate)); 
+  to_msdos_time(get_time(), (msdos_time*) &(short_entry.DIR_WrtTime));
+  
+  //aggiorno la posizione corrente 
+  file->pos_corr+=n_write; 
+
+  //devo aggiornare solo se ho scritto qualcosa in più 
+  if(file->pos_corr > short_entry.DIR_FileSize) 
+	short_entry.DIR_FileSize+=(file->pos_corr-short_entry.DIR_FileSize); 
+  
+  file->size=short_entry.DIR_FileSize;
+  flog(LOG_WARN,"Size %d", file->size); 
+  print_short_entry(&short_entry);
+  
+   if ( (ret=write_data(file->volume, file->cluster_father, offset, (byte*)&short_entry, sizeof(SHORT_ENTRY))) < 0 ) 
+      return ret; 
+  
+   reset_errno(); 
+   return n_write; 
+}   
+   
+   
+
+#include "fat.h"
+#include "type.h"
+#include "volumi.h"
+#include "sistema.h"
+#include "direntry.h" 
+
+
+
+extern TABELLA_VOLUMI * tabella;
+dword_ptr load_fat_memmory ( TABELLA_VOLUMI* );
+/*void insert_part_name ( const word * name, char * buf, int );
+//FCB *  add_short_dir ( SHORT_ENTRY_FAT  ** dir );
+//FCB *  add_long_dir ( LONG_ENTRY_FAT  ** dir );
+void print_fcb ( const FCB* );
+dword free_dir_entry ( dword_ptr );
+dword get_free_entry ( dword  n, dword_ptr cluster, dword size );
+dword get_free_cluster ( byte label, dword ultimo );
+//FCB * entry_on_cluster ( dword indice_free, dword_ptr cluster, const SHORT_ENTRY_FAT * short_entry );
+byte CHkSum ( char * name );
+void print_cluster ( dword_ptr cluster , int n );
+//BOOL create_short_entry ( SHORT_ENTRY_FAT * short_entry, const char *name );
+inline unsigned char toUpperChar ( unsigned char c );
+//BOOL createShortName ( const char * long_name,  char *short_name );
+/* Funzione che riporta il tipo di file system
+   Seguendo le specifiche MICROSOFT
+ */
+
+byte getFileSystemType ( dword DataSizeCluster ) {
+
+    if ( DataSizeCluster < 4085 )
+        return FAT12;
+    else if ( DataSizeCluster < 65525 )
+        return FAT16;
+    else
+        return FAT32;
+}
+
+
+/* Verifichiamo se è presente il MAGIC Number nel Settore */
+BOOL check_boot_sector ( MBR * mbr ) {
+
+    if ( mbr->magic_number[0] == 0x55 && mbr->magic_number[1]==0xAA )
+        return TRUE;
+    else
+        return FALSE;
+}
+
+
+/*
+ * FUNzione che Carica in memoria tutte le fat dei vari volumi
+ */
+
+BOOL init_fat() {
+
+    TABELLA_VOLUMI * temp=tabella;
+    dword_ptr  fat_tmp=NULL;
+
+    while ( temp ) {
+
+        fat_tmp= ( dword_ptr ) load_fat_memmory ( temp );
+
+        if ( fat_tmp==NULL )
+            return FALSE;  // verifica se devo deallocare qualcosa
+
+        // inizializzo la directory di root facendola puntare al cluster in memoria
+        temp->root= ( int * ) fat_tmp + ( temp->fat_info.first_cluster_directory );
+        temp->fat=fat_tmp;
+        temp=temp->next;
+
+    }
+
+    return TRUE;
+
+}
+
+
+
+// carica la fat in memoria
+
+dword_ptr  load_fat_memmory ( TABELLA_VOLUMI * entry ) {
+
+    lword size_fat_byte=entry->fat_info.size_fat*SECT_SIZE;
+    dword size_fat_set=entry->fat_info.size_fat;
+    int cicli=0, r=0;
+    char *  fat =NULL, *fat_tmp=NULL;
+    int i=0;
+
+    flog ( LOG_INFO, "Inizio caricamento FAT " );
+    flog ( LOG_INFO, "SIZE %d", size_fat_byte );
+
+    fat= ( char * ) mem_alloc ( size_fat_byte, 2 );
+
+    if ( fat == NULL )
+        flog ( LOG_WARN, "Errore Allocazione FAT" );
+
+    flog ( LOG_WARN, "Devo caricare %d", entry->fat_info.size_fat );
+    flog ( LOG_WARN, "cicli %d",  cicli=size_fat_set /32 );
+    flog ( LOG_WARN, "Rimanenza %d", size_fat_set%32 );
+    fat_tmp=fat;
+
+    for ( i=0; i <cicli; i++, ( ( char * ) fat_tmp +32*512 ) )
+        read_part_n ( entry-> ata, entry-> disco, entry->indice_partizione, entry->fat_info.first_set_fat, 32, ( void * ) fat_tmp );
+
+    if ( r != 0 )
+        read_part_n ( entry-> ata, entry-> disco, entry->indice_partizione, entry->fat_info.first_set_fat, r, ( void * ) fat_tmp );
+
+    flog ( LOG_INFO, "Fine caricamento FAT " );
+
+    return ( dword_ptr ) fat;
+
+}
+
+
+// funzione che mi rende il prossimo puntatore faccendo gli oportuni controlli
+
+// funzione che serve per scorrere la lista dei chain
+
+dword getNext ( dword_ptr fat , dword cluster ) {
+
+    dword_ptr ptr = fat + cluster ;
+    dword entry;
+    FCB  *  fcb=NULL;
+
+    if ( fat == NULL || cluster < 2 )
+        return NULL;
+
+    entry= * ( ( dword_ptr ) ( ptr ) ) & MASK_32 ;
+
+    if ( entry != EOC_32 )
+        return entry;
+    else
+        return 0;
+
+}
+
+
+
+
+
+
+/*GESTIONE FAT §§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§*/
+
+ /* INTERFACCIA  che mi permette di gestire la tabella FAT			   *
+ * Funzioni elementari che lavorano sulla tabella FAT				
+ * per convenzione tutte le funzioni che riguardano a fat terminano con fat*
+ ***********************************************************************************/
+
+// aggiunge un cluster alla lista chain
+// se chain è zero la crea 
+BOOL append_fat (const byte volume , const dword chain, dword *addr); 
+// elimina l'ultimo cluster dalla lista chain 
+BOOL delete_fat (const byte volume, const dword chain); 
+// elimina tutta una lista chain 
+BOOL delete_all_fat (const byte volume, const dword chain);
+void test_fat (byte label);
+/*FUNZIONI PRIVATE*******************************************************************
+ * Funzioni private che mi servono per gestire la tabella FAT, usate dalle funzioni *
+ * di interfaccia								     *
+/************************************************************************************/
+
+// funzione che scrive 'value' all'indirizzo addr sulla fat 
+BOOL scrivi_fat  (byte volume , dword addr, dword value);
+// funzione che scrive un valore nella fat in memoria 
+BOOL scrivi_mem_fat (const fat_ptr fat, const dword addr, const dword value);  
+// funzione che scrive un valore nella fat presente sul disco 
+BOOL scrivi_disco_fat (const TABELLA_VOLUMI * tab, dword addr , dword value);
+// funzione che legge un entrata della tabella è inserisce il valore su value 
+BOOL leggi_fat  (dword* value, dword addr, fat_ptr fat);
+// funzione che dato un cluster riporta il successivo della catena (si potrebbe fare come macro)
+//dword  getNext_fat (fat_ptr chain);
+// funzione che riporta il numero di un cluster libero
+BOOL getFree_fat  (const fat_ptr fat, dword fat_size, dword* addr);
+
+BOOL get_ultimo_fat (const fat_ptr fat, const dword chain, dword* ultimo); 
+BOOL get_penUltimo_fat (const fat_ptr fat, const dword chain, dword* ultimo); 
+
+
+dword get_next_fat(fat_ptr fat, dword cluster); 
+
+BOOL create_fat (const byte volume, dword* chain); 
+
+#define isFree_fat(N) ((N&MASK_32)==FREE_32)
+#define isLast_fat(N) ((N&MASK_32)==EOC_32)
+/*§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§§*/
+
+
+
+/* **********************************************************************************************
+ * SCRIVI_FAT :  
+ * Funzione che scrive un elemento nella tabella FAT. Questa funzione si occupa di modificare *
+ * il valore della fat in memoria mediante la funzione scrivi_mem_fat , modificare il valore *
+ * della fat sul disco, assicurandoci la consistenza dei due valori e la mutua esclusione *
+ * con altre chiamate alla scrivi o chiamate alla getFree mediante un semaforo di mutua  *
+ * esclusione. Senza questi accorgimenti si potrebbero verificare delle perdite di dati  *
+ * 											*
+ * VOLUME : volume sul quale lavorare							* 
+ * ADDR   : indirizzo della fat nel quale inserire il valore 				*
+ * VALUE : valore da inserire 								*
+ * 											*
+ * Return, riporta true se tutto è avvenuto con successo , altrimenti rende false e setta* 
+ * la variabile errno opportunamente.							*
+ ************************************************************************************************/
+
+BOOL scrivi_fat  (byte volume , dword addr, dword value) {
+  
+    TABELLA_VOLUMI * part=NULL; 
+    dword backup=0, read=0; 
+    
+    if(!(part=get_volume(volume))){ 
+	set_errno(1,"Volume errrato"); 
+	return FALSE;
+    } 
+    
+    //verifico se stiamo tentando una scrittura su un cluster errato 
+    
+    if(!leggi_fat(part->fat,addr,&read)) {
+	 set_errno(1,"Lettura Fallita");
+	 return FALSE; 
+    }
+    
+    if(read == BAD_CLUSTER_32) { 
+	set_errno(1,"Si sta provando a scrivere su un cluster corrotto"); 
+	return FALSE; 
+    }
+    
+    
+  //  sem_wait(part->semaphore);
+    
+      //leggo valore di backup per assicurare la consistenza dei dati tra disco è memoria
+      if(!leggi_fat(part->fat, addr, &backup)) {
+	 set_errno(1,"Lettura Fallita");
+	 return FALSE; 
+      }
+      //scrivo in memoria 
+      if(!scrivi_mem_fat(part->fat, addr, value))
+	  return FALSE; 
+	  
+      // provo a scrivere sul disco se non ci riesco provo a ripristinare il vecchio stato
+      if(!scrivi_disco_fat(part, addr, value)) {
+	  if(!scrivi_mem_fat(part->fat, addr, backup))
+	    set_errno(1,"Impossibile ripristinare il corretto valore, possibili malfunzionamenti");
+	  return FALSE; 
+      } 
+  
+  //  sem_signal(part->semaphore); 
+  
+    return TRUE; 
+} 
+
+/*SCRIVI_MEM_FAT : 
+ * funzione che scrive un valore nella fat in memoria,  facendo le opportune conversioni, 
+ * perché le entrate sono a 28 bit.  
+ */
+
+inline BOOL scrivi_mem_fat (const fat_ptr fat, const dword addr , const dword value) {
+  
+   *(fat+addr)= (value & MASK_32);
+  
+  return TRUE; 
+}
+
+/* SCRIVI_DISCO_FAT :
+ * funzione che scrive un valore nella fat presente sul disco, 
+ * da notare che questa funzione deve essere eseguita in mutua 
+ * esclusione, questo mi viene garantito dalla funzione 
+ * scrivi che è l'unica che invoca questa funzione 
+ * 
+ * TAB   : puntatore ad un volume indispensabile per le info sulla FAT 
+ * ADDR  : indirizzo cluster da scrivere nella FAT
+ * VALUE : valore da inserire nella cluster
+ * 
+*/
+
+BOOL scrivi_disco_fat (const TABELLA_VOLUMI * tab, dword addr , dword value) {
+  
+  dword settore[SECT_SIZE/SIZE_ENTRY_FAT_32]; 
+  
+  
+  dword n_set=FATSectorNum_32 (addr, tab->fat_info.first_set_fat);
+  dword offset=FATOffeset_32 (addr)/SIZE_ENTRY_FAT_32;
+
+  //leggo il settore  
+  read_part_n (tab->ata, tab->disco, tab->indice_partizione, n_set, 1, ( void * ) settore );
+  //modifico il settore 
+  settore[offset]=value & MASK_32;
+  //scrivo il settore modificato 
+  write_part_n ( tab->ata, tab->disco, tab->indice_partizione, n_set, 1, ( void * ) settore );
+  
+  return TRUE; 
+  
+}
+
+/* LEGGI_FAT : 
+ * Funzione che legge un valore dalla fat in memoria, facendo le opportune conversioni 
+ */
+
+inline BOOL leggi_fat  (fat_ptr fat , dword addr, dword * value) { 
+    //devo verificare che fat sia un buon cluster 
+  *value=*(fat+ (addr & MASK_32)) & MASK_32;
+ 
+  return TRUE; 
+  
+}
+
+
+
+/*GETFREE_FAT :
+ * funzione che ricerca un cluster vuoto, questa  funzione deve essere gestita in mutua esclusione, 
+ * questo le viene garantito dalla funzione append, l'unica funzione che ha la possibilità di 
+ * invocarla .
+ * 
+ * FAT : puntatore alla fat in memoria 
+ * SIZE : grandezza fat 
+ * ADDR : numero del cluster vuoto
+ *
+ * Ritorna Falso se non è stato possibile trovare un cluster libero e addr non ha senso.
+ * OTTIMIZZAZIONE : si potrebbe tenere un puntatore all'ultimo cluster trovato libero 
+ */  
+
+
+BOOL  getFree_fat  (const fat_ptr fat , dword fat_size, dword * addr) {
+  
+    int i=0; 
+    fat_ptr tmp_fat=fat; 
+    
+    for ( i< 2 ; i< fat_size; i++, tmp_fat++) 
+	   if(isFree_fat(*tmp_fat)) {
+	      *addr=i; 
+	      return TRUE; 
+	   } 
+	   
+    *addr=NULL; 
+    set_errno(1,"Non ci sono entrate libere nella fat"); 
+    return FALSE; 
+}
+
+/* +PUBBLICA APPEND_FAT :
+ * Funzione che aggiunge un cluster in ultima posizione alla catena di cluster passata come argomento. 
+ * Questa funzione ci garantisce che le operazioni di scrittura avvengano in mutua esclusione mediante 
+ * l'utilizzo di semafori. Se la catena non esiste la funzione la crea, per passare una catena vuota 
+ * si può passare il valore zero, in quanto questa è una posizione riservata all'interno della fat. 
+ * 
+ * VOLUME : identifica il volume nel quale stiamo lavorando 
+ * CHAIN  : identifica la catena sulla quale dobbiamo fare l'inserimento 
+ *	    se zero la crea  
+ * ADDR   : indirizzo nel quale viene inserita la posizione relativa alla fat 
+ *	    a senso solo se è la funzione a successo.
+ *
+ *Return Un valore e booleano se true l'inserimento ha avuto successo.
+ */ 
+
+BOOL append_fat (const byte volume , const dword chain, dword * addr) {
+  
+  TABELLA_VOLUMI * tab=NULL; 
+  fat_ptr fat=NULL; 
+  dword cluster_ultimo=0, cluster_new=0;
+  
+  if(!(tab=get_volume(volume))) {
+    set_errno(1,"Volume errato");
+    return FALSE; 
+  }
+  
+  
+  if(chain <2 ) { 
+     set_errno(1,"Cluster riservato");
+    return FALSE; 
+  }
+  
+  fat=tab->fat; 
+  
+  sem_wait(tab->semaphore); 
+  
+    if(!get_ultimo_fat(fat, chain, &cluster_ultimo)) {
+      sem_signal(tab->semaphore); 
+      return FALSE; 
+    }
+    
+ //   flog(LOG_WARN, "Ultimo %d", cluster_ultimo); 
+    
+  if(!getFree_fat(fat, tab->fat_info.size_fat,&cluster_new)) {
+     sem_signal(tab->semaphore);
+    return FALSE; 
+  }
+  
+  //devo scrivere nell'ultimo l'indirizzo del nuovo cluster
+    
+    if(!scrivi_fat(volume, cluster_ultimo, cluster_new))  {
+      sem_signal(tab->semaphore);
+      return FALSE; 
+    }
+    
+  if(!scrivi_fat(volume, cluster_new, EOC_32)) {
+    // se fallisce provo a ripristinare la situazione precedente
+    if(!scrivi_fat(volume, cluster_ultimo,  EOC_32)) 
+      set_errno(1,"Errore irrecuperabile, possibile perdita di dati");    
+    sem_signal(tab->semaphore); 
+    return FALSE; 
+  }
+  
+  // ... ----->Ultimo---->new(EOC); 
+  // finito inserimento 
+
+  sem_signal(tab->semaphore); 
+  
+  if(addr)
+    *addr=cluster_new; 
+  
+  return TRUE; 
+  
+}
+/*GET_ULTIMO_FAT 
+ * Funzione che analizza una catena di cluster e riporta  il numero dell'ultimo 
+ * cluster presente, facendo le opportune verifiche sulla consistenza stessa 
+ * della catena.
+ * FAT : Puntatore alla fat in memoria 
+ * CHAIN : numero di entrata del primo elemento di una catena 
+ * ULTIMO : indirizzo nel quale verrà memorizzato il numero dell'ultimo cluster
+ */
+
+BOOL get_ultimo_fat (const fat_ptr fat, const dword chain,  dword * ultimo){
+  
+ dword value=0; 
+ fat_ptr chain_tmp=fat+chain; //punto al primo elemento in memoria
+ dword count=chain;
+ 
+  if(chain < 2) {
+    set_errno(1,"Cluster riservati");
+    return FALSE; 
+  } 
+ 
+ 
+ while (TRUE) { 
+   
+   if(*chain_tmp==FREE_32) { 
+    set_errno(1,"Presente cluster libero nella lista"); 
+    *ultimo=0;
+    return FALSE; 
+   }
+  
+  if(*chain_tmp==BAD_CLUSTER_32) { 
+    set_errno(1,"Presente cluster corrotto nella lista"); 
+    *ultimo=0; 
+    return FALSE; 
+  }
+   
+  if(*chain_tmp==EOC_32) {
+    *ultimo=count;
+    return TRUE; 
+  }
+  
+  //aggiorno i puntatori 
+  count=*chain_tmp; // aggiorno il contenuto 
+  chain_tmp=(fat+*chain_tmp); // punto alla casella successiva
+   
+ }
+ 
+ return FALSE;
+}
+
+/*funzione uguale alla get ultim, con lunica differenza che ripora il pen ultimo indirizzo*/ 
+
+BOOL get_penUltimo_fat (const fat_ptr fat, const dword chain,  dword * pen_ultimo){
+  
+ dword value=0; 
+ fat_ptr chain_tmp=fat+chain; //punto al primo elemento in memoria
+ dword count=chain;
+ dword ultimo=chain; 
+ *pen_ultimo=0; 
+ 
+  if(chain < 2) {
+    set_errno(1,"Cluster riservati");
+    return FALSE; 
+  }  
+ 
+ while (TRUE) { 
+   
+   if(*chain_tmp==FREE_32) { 
+    set_errno(1,"Presente cluster libero nella lista"); 
+    *pen_ultimo=0;
+    return FALSE; 
+   }
+  
+  if(*chain_tmp==BAD_CLUSTER_32) { 
+    set_errno(1,"Presente cluster corrotto nella lista"); 
+    *pen_ultimo=0; 
+    return FALSE; 
+  }
+   
+   
+  if(*chain_tmp==EOC_32) {
+    *pen_ultimo=count;
+    return TRUE; 
+  }
+  
+  //aggiorno i puntatori 
+  count=ultimo;
+  ultimo=*chain_tmp; 
+  chain_tmp=fat+*chain_tmp;
+   
+ }
+ 
+ return FALSE;
+}
+
+
+
+
+/*PUBLICA : DELETE_FAT 
+ * Funzione che elimina l'ultimo cluster della catena. 
+ */ 
+
+BOOL delete_fat (const byte volume, const dword chain) { 
+  
+  TABELLA_VOLUMI * tab=NULL; 
+  fat_ptr fat=NULL; 
+  dword cluster_ultimo=0,cluster_penultimo=0; 
+  dword backup=0; 
+  
+  if(!(tab=get_volume(volume))) {
+    set_errno(1,"Volume errato");
+    return FALSE; 
+  }
+  
+  if(chain < 2) {
+    set_errno(1,"Cluster riservati");
+    return FALSE; 
+  }
+    
+    
+  fat=tab->fat; 
+  leggi_fat(fat,cluster_penultimo,&backup);
+  
+  
+  sem_wait(tab->semaphore); 
+  
+  if(!get_ultimo_fat(fat, chain, &cluster_ultimo)) {
+    sem_signal(tab->semaphore);
+    return FALSE; 
+  }
+  
+  if(!get_penUltimo_fat(fat, chain, &cluster_penultimo)) {
+    sem_signal(tab->semaphore);
+    return FALSE;   
+  }
+  //flog(LOG_WARN, "penultimo : %d ultimo %d", cluster_penultimo, cluster_ultimo);
+  
+  if(!scrivi_fat(volume, cluster_penultimo, EOC_32)) 
+    return FALSE; 
+
+  
+  if(!scrivi_fat(volume, cluster_ultimo, FREE_32)) {
+    if(!scrivi_fat(volume, cluster_penultimo,  backup)) 
+      set_errno(1,"Errore irrecuperabile, possibile perdita di dati");    
+    sem_signal(tab->semaphore);
+    return FALSE; 
+  }
+  
+  sem_signal(tab->semaphore); 
+  
+  return TRUE;
+ 
+}
+
+
+inline BOOL delete_all_fat (const byte volume, const dword chain) { 
+  
+  while (delete_fat(volume,chain)); 
+  reset_errno(); 
+  return TRUE; 
+  
+}
+
+/*funzione che mi riporta il valore del cluster successivo*/
+/* uso l'int perchè se c'è un errore riporta meno uno  
+  lo zero è una posizione riservata della fat 
+  
+ */ 
+
+dword get_next_fat(const fat_ptr fat, const dword cluster) {
+  
+  dword value=*(fat+cluster)&MASK_32; 
+  
+  
+  if ( fat == NULL || cluster < 2 ) { 
+     set_errno(1,"Parametri errati"); 
+     return FALSE;  
+  }
+  
+  if ( cluster == EOC_32) {
+      set_errno(1,"Catena terminata"); 
+      return FALSE; 
+  }
+  
+  if ( value == BAD_CLUSTER_32) {
+     set_errno(1,"Elemento corrotto");
+     return FALSE; 
+  }
+  
+  if (value == FREE_32) { 
+      set_errno(1,"Elemento Vuoto");
+      return FALSE; 
+  } 
+   
+  
+  return *(fat+cluster)&MASK_32;
+  
+}
+
+
+
+/*Funzione che  crea una catena all'interno della da fat*/
+
+BOOL create_fat (const byte volume, dword* chain) { 
+  
+  
+  TABELLA_VOLUMI * tab=NULL; 
+  fat_ptr fat=NULL; 
+  dword cluster_new=0;
+  
+  if(!(tab=get_volume(volume))) {
+    set_errno(1,"Volume errato");
+    return FALSE; 
+  }
+  
+  
+  fat=tab->fat; 
+  *chain=NULL; 
+  
+  sem_wait(tab->semaphore); 
+  
+  if(!getFree_fat(fat, tab->fat_info.size_fat,&cluster_new)) {
+     sem_signal(tab->semaphore); 
+    return FALSE; 
+  }
+  
+  if(!scrivi_fat(volume, cluster_new, EOC_32)) {
+    sem_signal(tab->semaphore); 
+    return FALSE; 
+  }
+  
+  sem_signal(tab->semaphore); 
+  
+  *chain=cluster_new; 
+  
+  return TRUE; 
+  
+}
+
+void stampa_fat( byte label  , dword chain ) {
+  
+  
+    TABELLA_VOLUMI * tab = get_volume(label); 
+    
+    if(!tab) { 
+	set_errno(5, "Volume non torvato"); 
+	return; 
+    }
+    
+    
+    dword t=chain; 
+    do {
+	flog(LOG_DEBUG, "Elemento : %d", t);
+	if(!(t=get_next_fat(tab->fat, t))) {
+	  perror("Errore lettura ");
+	  break; 
+	}
+    } while( !isLast_fat(t)); 
+  
+}
+
+void print_chain( byte volume, dword chain ) {
+  
+   TABELLA_VOLUMI *tab= get_volume(volume); 
+  
+    dword t=chain; 
+    do {
+	flog(LOG_DEBUG, "Elemento : %d", t);
+	if(!(t=get_next_fat(tab->fat, t))) {
+	  perror("Errore lettura ");
+	  break; 
+	}
+    } while(!isLast_fat(t)); 
+    
+}
+
+
+/*funzione di test sul fat, usa tutte le funzioni di interfaccia disponibili 
+ * per evitare malfunzionamenti del disco l'insieme di queste operazioni deve essere un ioperazione neutra 
+ * in modo tale che non lasci dei risultati permaneti sul disco :) 
+ */
+
+void test_fat (byte label) { 
+  
+  dword cluster_1=0,cluster_2=0,t,i; 
+  // per prima cosa creiamo un entry , se tutto avviene secondo le impostazioni 
+  // deve essere crerata una catena e reso il numero del primo cluster 
+  
+  TABELLA_VOLUMI * tab=get_volume(label);
+  
+  
+  // stampo le prime 20 entrate della fat in modo grezzo 
+  
+  flog(LOG_DEBUG,"FAT :"); 
+  
+  for ( i=0; i< 20; i++) 
+    flog(LOG_DEBUG,"%x", *(tab->fat+i)); 
+  
+   flog(LOG_DEBUG, "\n"); 
+  
+  // creo la catena 1
+  if(!create_fat(label, &cluster_1))
+      perror("Creazione prima catena"); 
+  else 
+      flog(LOG_DEBUG, "Prima catena creata %d", cluster_1); 
+  
+  
+  // creo la catena 2
+  if(!create_fat(label, &cluster_2))
+      perror("Creazione seconda catena"); 
+  else 
+      flog(LOG_DEBUG, "Seconda catena creata %d", cluster_2); 
+  
+  
+  // inserisco nelle  catene intrecciandole  
+  for (i=0; i< 5; i++) {
+ 
+    if(!append_fat(label,cluster_1,&t)) 
+      perror("APPEND 1"); 
+    else 
+      flog(LOG_DEBUG, "Inserito : %d", t); 
+    
+     if(!append_fat(label,cluster_2,&t))
+      perror("APPEND 1"); 
+    else 
+      flog(LOG_DEBUG, "Inserito : %d", t); 
+  
+  }
+  
+  
+  //stampo la catena 
+   t=cluster_1; 
+    do {
+	flog(LOG_DEBUG, "Elemento : %d", t);
+	if(!(t=get_next_fat(tab->fat, t))) {
+	  perror("Errore lettura ");
+	  break; 
+	}
+    } while( !isLast_fat(t)); 
+    
+    
+  //stampo la catena 
+   t=cluster_2; 
+    do {
+	flog(LOG_DEBUG, "Elemento : %d", t);
+	if(!(t=get_next_fat(tab->fat, t))) {
+	  perror("Errore lettura ");
+	  break; 
+	}
+    } while( !isLast_fat(t)); 
+    
+    
+  // elimino la catena   1   
+ for (i=0; i< 5; i++) {
+    if(!delete_fat(label,cluster_1)) 
+      perror("Delete"); 
+    else 
+      flog(LOG_DEBUG, "Cancellato  : %d", i); 
+  }
+  
+  if(!delete_fat(label,cluster_1)) 
+          perror("Delete"); 
+
+   t=cluster_1; 
+   if(!(t=get_next_fat(tabella->fat, t))) 
+     perror("Errore lettura");
+   else 
+     flog(LOG_DEBUG, "Elemento : %d", t);
+
+  // elimino la catena due 
+  delete_all_fat(label, cluster_2);
+  t=cluster_2; 
+   if(!(t=get_next_fat(tabella->fat, t))) 
+     perror("Errore lettura");
+   else 
+     flog(LOG_DEBUG, "Elemento : %d", t);
+
+  
+  flog(LOG_DEBUG,"FAT :"); 
+  
+  for ( i=0; i< 20; i++) 
+    flog(LOG_DEBUG,"%x", *(tab->fat+i)); 
+  
+  flog(LOG_DEBUG, "\n"); 
+ 
+  
+  // creo la catena 2
+  if(!create_fat(label, &cluster_2))
+      perror("Creazione seconda catena"); 
+  else 
+      flog(LOG_DEBUG, "Seconda catena creata %d", cluster_2); 
+  
+ delete_all_fat(label, cluster_2);
+
+
+   // creo la catena 2
+  if(!create_fat(label, &cluster_2))
+      perror("Creazione seconda catena"); 
+  else 
+      flog(LOG_DEBUG, "Seconda catena creata %d", cluster_2); 
+  
+ delete_all_fat(label, cluster_2);
+  
+  return ; 
+  
+  
+  
+}
+
+
+
+/*$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$*/
+
+
+
+/**************************************************************FILE SYSTEM ***********************************/
+
+#include "fat.h"
+#include "fs.h" 
+#include "type.h"
+#include "sistema.h" 
+#include "volumi.h"
+#include "system_call.h" 
+#include "data.h"
+#include "direntry.h" 
+#include "fs.h" 
+#include "errno.h" 
+
+BOOL fs_init(); 
+
+
+/*STRUTTURE DATI GBOLBALI */
+TABELLA_VOLUMI * tabella=NULL; 
+FCB * root=NULL; 
+
+struct _fs_info_{ 
+      char curret_direcorty[260]; 
+      unsigned char  volume; 
+      void * local_table_file; 
+      void * global_table_file; 
+};
+
+typedef struct _fs_info_ fs_info; 
+
+
+void test_sistema() { 
+ 
+    char * test=NULL; 
+  
+
+  
+  flog(LOG_WARN, "ENRICO (%s-line%d)",__FILE__,__LINE__); 
+  
+  
+}
+
+
+// funzione che inizializza la struttura globale presente nel modulo sistema
+
+BOOL init_fs_io_state() { 
+    
+  
+    byte *buf=NULL; 
+    dword size = SIZE_VOLUME+MAX_PATH+ (sizeof(FCB) *MAX_FILE); 
+    const char * pwd="/"; 
+    dword r=0; 
+    
+    if (!tabella) { 
+	set_errno(6, "Non presente tabella volumi"); 
+	 return FALSE; 
+    }
+    
+    flog(LOG_DEBUG, "SIZE %d", size); 
+    buf=mem_alloc(size, 4); 
+    if (!buf) { 
+	set_errno(ENOMEM, "Memoria esaurita"); 
+	return FALSE; 
+    }
+    
+    memset(buf, 0 , size); 
+    *(buf+ADDR_VOLUME)=tabella->label; 
+    strncpy((char*)(buf+ADDR_PWD), pwd, 1); 
+    
+    //primitiva di sistema 
+    if((r=io_space_init(buf,size))) {
+      set_errno(r, "Io space init errore : %d", r); 
+      return FALSE; 
+    }
+    
+    return TRUE; 
+    
+}
+
+
+void test_fat( byte label); 
+
+/* Pubblica FUNZIONE 
+ * Questa funzione ha lo scopo di inizializzare il FS mediante delle chiamate 
+ * hai vari moduli di cui è composto il fs. Se attiva la macro DEBUG_FS esegue
+ * dei test sui vari oggetti che lo compongono.
+ * Può fallire quando fallisce la chiamata di un sotto modulo. 
+ */ 
+BOOL  fs_init(void){ 
+
+  
+  flog(LOG_INFO, "Inizialiazzazione FILE SYSTEM "); 
+
+  // chiamata per la creazione della tabella dei volumi 
+  if(!(tabella=crea_tabella_volumi())) {
+      perror("Creazione tabella volumi fallita"); 
+      return FALSE; 
+  }
+
+#ifdef DEBUG_FS 
+  stampa_tabella_volumi('C');
+#endif 
+  
+  // carico fat in memoria 
+  if(!( init_fat())){
+      perror("Caricamento FAT fallito"); 
+      return FALSE; 
+  }
+  
+#ifdef DEBUG_FS 
+  test_fat('C'); 
+#endif
+
+  
+  //stampa_tabella_volumi(tabella);   //DEBUG
+  //flog(LOG_INFO, " aaa : %x", getNext(tabella->fat, 2)); 
+  //get_dir_entry('C', 2); 
+  //create_dir_entry('C', 2, "a.txtllll"); 
+ 
+//  test_write('C'); 
+
+//	     stampa_fat('C', 2); 
+	     
+  
+//  test_dir('C');
+  
+ // test_sistema();
+  
+  if(init_fs_io_state()) 
+      flog(LOG_INFO,"Inizializata area IOSPACE");
+  else 
+    perror("Inizialiazzazione IOSPACE fallita "); 
+  
+ 
+// test_system_call(); 
+  
+  flog(LOG_INFO,"Fine inizializzazione FILE SYSTEM"); 
+
+
+  return TRUE; 
+}
+
+
+
+
+
+
+/* SYSTEM CALL */ 
+
+#include "string.h" 
+#include "direntry.h" 
+#include "fs.h" 
+#include "errno.h" 
+#include "volumi.h" 
+#include "system_call.h"
+
+
+
+
+BOOL create_pathassoluto(const char *path, const char * pwd, char *path_assoluto);
+
+// void split_dword (const dword value, word * low, word * high) {
+// 
+//         *low=(word)(value&0x0000FFFF);
+//         *high=(word)((value&0xFFFF0000)>>16);
+// };
+// 
+// void merge_dword(dword * value, const word low , const word high) {
+// 
+//         *value=((dword)(high)<<16) | (dword)(low);
+// 
+// };
+
+/* Funzione che estre il nome dal path  e lo inserisce su nam e, che deve essere un bu di lunghezza massima oper contenere il nome del file 
+ * 
+ *
+
+
+
+BOOL get_name( const char * path , char * name) {
+  
+  char * token =NULL,* path_tmp=NULL;
+  size_t size_path = strlen(path); 
+  char * r=NULL; 
+  
+  if(!path || !name) 
+      return FALSE; 
+  
+  if(*(path + size_path -1) == '/')
+     return FALSE; 
+  
+  // il path non puo erssere piu lungo di questo 
+  if(size_path >= MAX_PATH)
+    return FALSE; 
+ 
+
+  path_tmp=mem_alloc(MAX_PATH, 1); 
+  memset(path_tmp, 0, MAX_PATH); 
+  strncpy(path_tmp, path, size_path); 
+  
+
+  token=strtok(path_tmp, "/"); 
+  memset(name, 0, MAX_NAME); 
+  strncpy(name, token , strlen(token)); 
+  
+  while (token != NULL)
+  {
+    memset(name, 0, MAX_NAME); 
+    strncpy(name, token , strlen(token)); 
+    token=strtok (NULL, "/");
+  } 
+  
+  
+  flog(LOG_DEBUG,"%s",name);
+  
+  
+  mem_free(path_tmp); 
+  return TRUE; 
+  
+}
+
+*/ 
+
+// funzione che preleva il nome dal path 
+BOOL get_name( char * path , char * name,size_t size_name) {
+
+  char *tok=NULL; 
+  size_t size_path = strlen(path); 
+  
+  if ( !name  || !path) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return FALSE;
+  }
+  
+  if ( !size_path || *(path+size_path-1)=='/') {
+    set_errno(EINVAL,"Nome invalido(%s-line%d)", __FILE__, __LINE__); 
+    return FALSE;
+  }
+ 
+  tok=strrchr(path, '/'); 
+
+  
+  if(!tok){
+    memset(name,0,size_name);
+    strncpy(name,path, size_path);
+    memset(path,0,size_path);
+  }
+  else {
+    strncpy(name, tok+1, size_name); 
+    memset(tok, 0,size_path);  
+  }
+  
+  //bisogna controllare bene i path 
+  
+    return TRUE; 
+    
+}
+
+
+// assumo che pwd termini con una stringa 
+
+BOOL get_path( const char * path,const  char * pwd, char * path_assoluto) { 
+ 
+  
+  if (!path || !pwd  || !path_assoluto ) 
+      return FALSE; 
+  
+  if(*pwd != '/' || *(pwd + (strlen(pwd)-1)) != '/') 
+      return FALSE; 
+  
+  if ( *path == '/') // path è un path assoluto 
+    strncpy(path_assoluto, path, strlen(path)); 
+  else { 
+      strncpy(path_assoluto, pwd, strlen(pwd)); 
+      strncat(path_assoluto, path, strlen(path)); 
+  }
+    
+  return TRUE; 
+}
+
+
+// funzione che estrae il volume dal path è verifica se è presente 
+BOOL get_new_volume(const char * path , char *volume) { 
+  
+  // il volume è formato da una sola lettera e deve essere specificato 
+  // come primo argomento separato da due punti 
+  // C:/
+   
+  if ( path == NULL) { 
+      set_errno(EFAULT,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+      return FALSE;
+  }
+
+
+  if (strchr(path, ':')) {  
+    flog(LOG_DEBUG,"VOLUME %c", *path);
+    if(!get_volume(*path)) { 
+      set_errno(EINVAL,"Volume errato (%s-line%d)", __FILE__, __LINE__); 
+      return FALSE;
+    }else { 
+	*volume=*path; 
+	return TRUE; 
+    }
+    
+  }
+  
+  return TRUE;  
+}
+
+
+
+/*funzione che deve ricercare all'interno delle varie direntry i vari fcB 
+ */ 
+
+#define SIZE_FCB sizeof(FCB) 
+
+BOOL get_fcb_father( byte volume,  char * path_assoluto, FCB* file) { 
+
+  TABELLA_VOLUMI * tab=NULL;
+  char *token=NULL; 
+  FCB *root=NULL, *padre=NULL, *figlio=NULL;
+  char my_path[MAX_PATH]; 
+  
+  if(!path_assoluto || !file || !volume ) {
+    set_errno(ENOMEM, "Errore parametri (%s-line%d)", __FILE__, __LINE__); 
+      return FALSE; 
+  } 
+  
+  tab=get_volume(volume); 
+  
+  if(!tab) {
+    set_errno(ENOMEM, "Errore volume (%s-line%d)", __FILE__, __LINE__); 
+      return FALSE; 
+  } 
+  
+  root=&(tab->fcb_root); 
+  memset(my_path,0,MAX_PATH); 
+  strncpy(my_path,path_assoluto,strlen(path_assoluto)); 
+  
+  
+  if(!(padre=mem_alloc(sizeof(FCB),1))) { 
+      set_errno(ENOMEM, "Errore mem_alloc (%s-line%d)", __FILE__, __LINE__); 
+      return FALSE; 
+  }
+  if(!(figlio=mem_alloc(sizeof(FCB),1))) { 
+      set_errno(ENOMEM, "Errore mem_alloc (%s-line%d)", __FILE__, __LINE__); 
+      mem_free(padre); 
+      return FALSE; 
+  }
+
+
+ memcpy(padre, root, sizeof(FCB)); 
+ memcpy(figlio, root, sizeof(FCB)); 
+ 
+ token=strtok(my_path, "/");
+ 
+ while(token) {
+   flog(LOG_INFO, "tok : %s", token); 
+      
+      if((!open_entry(token,padre,figlio))) {	// prima fa la fuznione  
+	set_errno(EINVAL,"Errore path (%s-line%d)", __FILE__, __LINE__); 
+	 mem_free(my_path); 
+	 return FALSE; 
+      }
+      
+    
+      if(figlio->type!=ATTR_DIRECTORY) {	// prima fa la fuznione  
+	 set_errno(EINVAL,"Errore path (%s-line%d)", __FILE__, __LINE__); 
+	 mem_free(my_path); 
+	 return FALSE; 
+      }
+      
+      flog(LOG_DEBUG, "Name %s", figlio->name); 
+      memcpy(padre, figlio, SIZE_FCB); 
+      token=strtok(NULL, "/"); 
+     
+   }
+   
+  //print_fcb(precedente); 
+   
+   memcpy(file, figlio, SIZE_FCB); 
+   
+ //  print_fcb(file); 
+   
+   file->semaphore=sem_ini(MUTEX); 
+   
+   mem_free(padre); 
+   mem_free(figlio); 
+   
+   return TRUE; 
+  
+}
+
+
+// funzione che inserisce un file control block nello spazio IOSPACE sisteam 
+int list_fcb() {
+
+  
+  dword size=(sizeof(FCB) *MAX_FILE); 
+  dword offset=SIZE_VOLUME+MAX_PATH; 
+  byte * buf = NULL; 
+  int i=0,r=0; 
+  FCB * fcb=NULL; 
+  
+  flog(LOG_INFO,"LIST FCB "); 
+  
+
+    
+  
+  buf=mem_alloc(size, 1); 
+  
+  if (!buf) { 
+   set_errno(ENOMEM, "Memoria insufficiente(%s-line%d)", __FILE__, __LINE__);
+   return -1; 
+  }
+  
+  memset(buf,0,size); 
+ 
+  //leggo il buffer
+  if ((r=io_space_read(offset, buf, size))) { 
+    set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+    mem_free(buf); 
+    return -1; 
+  }
+     
+   fcb=(FCB*)buf; 
+  
+   for ( i=0; i< MAX_FILE; i++, fcb++) {
+    
+	if(!fcb->volume)
+	 continue; 
+	print_fcb(fcb); 
+	
+    }
+  
+   flog(LOG_INFO," FINE LIST FCB "); 
+  return 0; 
+  
+}
+
+//funzione che rimuove un fcb 
+
+int remove_fcb( int indice) {
+
+  
+  dword size=sizeof(FCB); 
+  dword offset=SIZE_VOLUME+MAX_PATH; 
+  byte * buf = NULL; 
+  int i=0,r=0; 
+  FCB * fcb=NULL; 
+
+  flog(LOG_WARN, "Remove "); 
+  
+  if ( indice < 0 || indice >=MAX_FILE) {
+    set_errno(EINVAL, "Parametro non corretto (%s-line%d)", __FILE__, __LINE__);
+    return -1; 
+  }
+    
+  
+  buf=mem_alloc(size, 1); 
+  
+  if (!buf) { 
+   set_errno(ENOMEM, "Memoria insufficiente(%s-line%d)", __FILE__, __LINE__);
+   return -1; 
+  }
+  
+  memset(buf,0,size); 
+ 
+  if ((r=io_space_write(offset+(indice*SIZE_FCB),buf, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(buf); 
+    return -1; 
+  }
+
+   mem_free(buf); 
+   
+  return 0; 
+  
+}
+
+
+
+// funzione che inserisce un FCB nell'area di memoria IOSPACE nella memoria sistem 
+// se trova riporta l'indice
+
+int insert_fcb(const FCB * file) {
+  
+  dword size=(sizeof(FCB) *MAX_FILE); 
+  dword offset=SIZE_VOLUME+MAX_PATH; 
+  byte * buf = NULL; 
+  int i=0,r=0; 
+  FCB * fcb=NULL, *fcb_tmp=NULL; 
+  
+ 
+  if (!file) {
+    set_errno(EINVAL, "Parametro non corretto (%s-line%d)", __FILE__, __LINE__);
+    return -1; 
+  }
+    
+  
+  buf=mem_alloc(size, 1); 
+  
+  if (!buf) { 
+   set_errno(ENOMEM, "Memoria insufficiente(%s-line%d)", __FILE__, __LINE__);
+   return -1; 
+  }
+  
+ 
+  //leggo il buffer
+  if ((r=io_space_read(offset, buf, size))) { 
+    set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+    mem_free(buf); 
+    return -1; 
+  }
+  
+  fcb=(FCB*)buf; 
+  fcb_tmp=(FCB*)buf; 
+  
+  //poichè non sono accorpati possono esistere dei buchi per evitare di aprire lo 
+  // stesso file lo cerco 
+  
+  for ( i=0; i< MAX_FILE; i++, fcb_tmp++) {
+    
+    if (fcb_tmp->volume == 0)  
+	continue; 
+    else if ( fcb_tmp->volume == file->volume && 
+	      fcb_tmp->cluster_father == file->cluster_father &&
+	      !strncmp(fcb_tmp->name, file->name, strlen(fcb_tmp->name))) 
+	      { 
+		set_errno(EEXIST, "File già aperto"); 
+		return -1; 
+	      }
+	      
+  }
+  
+  
+  
+  //scorro finché non trovo una posizione libera 
+  for ( i=0; i< MAX_FILE; i++, fcb++) {
+    
+    //libero
+    if (fcb->volume == 0)  
+	if ((r=io_space_write(offset+(i*SIZE_FCB),file , SIZE_FCB))) { 
+	    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+	    mem_free(buf); 
+	    return -1; 
+	}else {
+	   // print_fcb(file); 
+	    return i; 
+	  }
+  }
+  
+  set_errno(r, "Table file full");
+  mem_free(buf); 
+  return -1; 
+  
+}
+
+
+// funzione che verifica che ci siano poszioni libere prima di una creazione 
+
+
+BOOL free_fcb() {
+  
+  dword size=(sizeof(FCB) *MAX_FILE); 
+  dword offset=SIZE_VOLUME+MAX_PATH; 
+  byte * buf = NULL; 
+  int i=0,r=0; 
+  FCB * fcb=NULL, *fcb_tmp=NULL; 
+  
+   
+  buf=mem_alloc(size, 1); 
+  
+  if (!buf) { 
+   set_errno(ENOMEM, "Memoria insufficiente(%s-line%d)", __FILE__, __LINE__);
+   return FALSE; 
+  }
+  
+  //leggo il buffer
+  if ((r=io_space_read(offset, buf, size))) { 
+    set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+    mem_free(buf); 
+    return FALSE; 
+  }
+  
+  fcb=(FCB*)buf; 
+  fcb_tmp=(FCB*)buf; 
+  
+  //poichè non sono accorpati possono esistere dei buchi per evitare di aprire lo 
+  // stesso file lo cerco 
+  
+  for ( i=0; i< MAX_FILE; i++, fcb_tmp++)     
+    if (fcb_tmp->volume == 0)  
+	return TRUE;      
+   
+   return FALSE; 
+}
+  
+
+
+// apre un file 
+
+
+
+int c_open (const char * path, dword mode) { 
+
+   FCB * file_fcb=NULL, 	// FCB del file che dobbiamo aprire
+       * father_fcb=NULL; 	// FCB della cartella madre 
+  
+   byte volume=0; 
+   char *pwd=NULL,		// contiene la direcotory di lavoro 
+	 *path_assoluto=NULL; 	// Path assoluto della direcotruy che contiene il file
+   char *name_file=NULL; 	// nome del file; 
+   dword r=0; 
+   BOOL  ret=FALSE; 
+   int fd=0; 
+   
+   flog(LOG_INFO, "OPEN path %s  mode %x", path , mode ); 
+   
+   name_file=mem_alloc(MAX_NAME,1);  
+   memset(name_file, 0, MAX_NAME); 
+   path_assoluto=mem_alloc(MAX_PATH, 1);
+   memset(path_assoluto, 0, MAX_PATH );
+   pwd=mem_alloc(MAX_PATH, 1);
+   memset(pwd, 0, MAX_PATH );
+
+   // prelevo informazioni dall'area privata del processo 
+  //io_space_read(natl offset, natb vetti[], natl quanti)
+   if ((r=io_space_read(0,(byte*)&volume, 1))){
+      set_errno(r, "Errore io_space_read %s", path);;
+      mem_free(name_file); 
+      mem_free(path_assoluto);
+      mem_free(pwd); 
+      return -1; 
+   }
+   
+   if ((r=io_space_read(ADDR_PWD, pwd, MAX_PATH))){
+      set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+      mem_free(name_file); 
+      mem_free(path_assoluto);
+      mem_free(pwd); 
+      return -1; 
+   }
+   
+   flog(LOG_DEBUG, "path %s volume %c", pwd, volume ); 
+   
+   //estraggo il nome del file 
+   if(!get_name((char*)path, name_file,MAX_NAME)) { 
+      set_errno(EINVAL, "Nome file non corretto %s", path); 
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return -EINVAL; 
+   } 
+   //estraggo il path assoluto 
+   if(!get_path(path, pwd, path_assoluto)){
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return -EINVAL; 
+  }
+  
+  if(!free_fcb()){
+      set_errno(ENFILE, "Full table"); 
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return -ENFILE; 
+  }
+  
+  
+flog(LOG_DEBUG, "nome %s path %s", name_file, path_assoluto); 
+ 
+  father_fcb=mem_alloc(sizeof(FCB),1); 
+  file_fcb=mem_alloc(sizeof(FCB),1); 
+  memset(father_fcb,0,sizeof(FCB)); 
+  memset(file_fcb,0,sizeof(FCB)); 
+
+  
+  //prelevo il fcb del padre
+  if(!get_fcb_father(volume, path_assoluto, father_fcb)) {
+       set_errno(EINVAL, "Path file non corretto %s", path); 
+       goto errore_open; 
+  }
+  
+//    print_fcb(father_fcb);
+
+  ret=open_entry(name_file, father_fcb, file_fcb); 
+  
+//  print_fcb(father_fcb);
+//  print_fcb(file_fcb); 
+  
+  //gestione del file 
+   
+   //CREATE 
+  
+  
+  flog(LOG_WARN, "Create %d ret %d ", IS_CREAT(mode), ret); 
+  
+  
+  if ( ret && IS_CREAT(mode) ) {
+    set_errno(EEXIST, "File Exist %s", name_file); 
+    goto errore_open; 
+  }
+  
+  if ( !ret && IS_CREAT(mode) && !IS_DIRECTORY(mode)) { 
+     // gestisco creazione del file 
+     flog(LOG_WARN,"creo il file, %s", name_file); 
+     //print_fcb(father_fcb); 
+      if(!create_entry(name_file,ATTR_ARCHIVE, father_fcb, file_fcb)) { 
+  	  perror("Creazione entry"); 
+	  goto errore_open; 
+        }else 
+ 	flog(LOG_DEBUG, "creazione avenuta"); 
+  }
+  
+  //DIRECTORY 
+  
+  if ( ret && IS_DIRECTORY(mode) &&  file_fcb->type != ATTR_DIRECTORY) {
+	set_errno(ENOTDIR, "Is not Directory %s", name_file); 
+	goto errore_open;
+  }
+    
+  if( ret && !IS_DIRECTORY(mode) && file_fcb->type == ATTR_DIRECTORY) {
+	set_errno(EISDIR, "Is  Directory %s", name_file); 
+	goto errore_open;
+  }
+  
+  if (!ret && !IS_CREAT(mode)) { 
+	set_errno(ENOENT,"No such file or directory %s", name_file); 
+	goto errore_open;
+  } 	
+  
+  flog(LOG_WARN, "MODE %x %d %d %d ", mode, IS_READ(mode) , IS_WRITE(mode) ,  IS_RDWR(mode)); 
+  
+//   if ( ret && IS_READ(mode) && ( IS_WRITE(mode) ||  IS_RDWR(mode) )) {
+// 	set_errno(EINVAL, "Bad param"); 
+// 	goto errore_open;
+//   }
+//   
+//   if ( ret && IS_WRITE(mode) && ( IS_READ(mode) ||  IS_RDWR(mode) )) {
+// 	set_errno(EINVAL, "Bad param"); 
+// 	goto errore_open;
+//   }
+//   
+
+  
+  // se sono qui significa che il fcb del file è corretto 
+  file_fcb->mode=mode; 
+
+ // print_fcb(file_fcb);
+  
+  // ora devo inserire queste informazioni nel IO SPACE del processo corrente 
+  fd=insert_fcb(file_fcb);
+  
+  if ( fd < 0) {
+    flog(LOG_WARN,"Errore fd"); 
+    goto errore_open; 
+  } 
+  
+  //0ist_fcb(file_fcb);
+ 
+  
+  
+  mem_free(father_fcb); 
+  mem_free(file_fcb);
+  mem_free(name_file); 
+  mem_free(path_assoluto); 
+  mem_free(pwd);
+  return fd;
+	  
+
+
+errore_open:
+
+  mem_free(father_fcb); 
+  mem_free(file_fcb); 
+  mem_free(name_file); 
+  mem_free(path_assoluto); 
+  mem_free(pwd);
+  return -1;
+
+}
+
+
+//chiude un file 
+
+int c_close(int fd) { 
+  
+  reset_errno(); 
+  return  remove_fcb(fd);
+}
+
+int  c_read(int fd, void *buf, size_t count){
+  
+  FCB * file=NULL; 
+  dword size=sizeof(FCB); 
+  dword offset=SIZE_VOLUME+MAX_PATH;  
+  int r=0,n_read=0; 
+  
+  flog(LOG_WARN,"READ"); 
+  
+  if (  fd<0 || fd>=MAX_FILE  || buf==NULL || count <0) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+
+  if(!(file=mem_alloc(SIZE_FCB,1))){
+    set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+    return -ENOMEM; 
+  } 
+ 
+  
+  memset(file,0,SIZE_FCB); 
+  //leggo il file control block 
+  if ((r=io_space_read(offset+(fd*SIZE_FCB),file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(file); 
+    return -r; 
+  }
+
+ // print_fcb(file); 
+
+   if((n_read=read_fcb(file, buf, count)) < 0 ) { 
+     perror("Read");  
+     mem_free(file); 
+      return -1; 
+   }
+
+  //  print_fcb(file); 
+
+   if ((r=io_space_write(offset+(fd*SIZE_FCB),file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(file); 
+    return -r; 
+  }
+
+
+   mem_free(file); 
+   reset_errno(); 
+   return n_read; 
+} 
+  
+  
+
+
+
+/*funzione che scrive il contenuto di buf su un file */
+
+int  c_write(int fd, const void *buf, size_t count){
+  
+  FCB * file=NULL; 
+  dword size=sizeof(FCB); 
+  dword offset=SIZE_VOLUME+MAX_PATH;  
+  int r=0,n_write=0; 
+  
+  flog(LOG_WARN,"WRITE"); 
+  
+  if (  fd<0 || fd>=MAX_FILE  || buf==NULL || count <0) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+
+  if(!(file=mem_alloc(SIZE_FCB,1))){
+    set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+    return -ENOMEM; 
+  } 
+ 
+  
+  memset(file,0,SIZE_FCB); 
+  //leggo il file control block 
+  if ((r=io_space_read(offset+(fd*SIZE_FCB),file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(file); 
+    return -r; 
+  }
+
+ // print_fcb(file); 
+
+
+   if((n_write=write_fcb(file, buf, count)) < 0 ) { 
+     perror("write"); 
+     mem_free(file); 
+      return -1; 
+   }
+
+  //  print_fcb(file); 
+
+   if ((r=io_space_write(offset+(fd*SIZE_FCB),file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(file); 
+    return -r; 
+  }
+
+
+   mem_free(file); 
+   reset_errno(); 
+   return n_write; 
+} 
+
+
+/*
+ * a nuova posizione è impostata usando il valore specificato da offset, sommato al riferimento dato da whence; quest'ultimo può assumere i seguenti valori7:
+
+SEEK_SET si fa riferimento all'inizio del file: il valore (sempre positivo) di offset indica direttamente la nuova posizione corrente.
+SEEK_CUR si fa riferimento alla posizione corrente del file: ad essa viene sommato offset (che può essere negativo e positivo) per ottenere la nuova posizione corrente.
+SEEK_END si fa riferimento alla fine del file: alle dimensioni del file viene sommato offset (che può essere negativo e positivo) per ottenere la nuova posizione corrente.
+ Dato che la funzione ritorna la nuova posizione, usando il valore zero per offset si può riottenere la posizione corrente nel file chiamando la funzione con lseek(fd, 0, SEEK_CUR).
+*/
+
+int c_lseek(int fd, int new_offset, int whence){
+  
+  FCB * file=NULL; 
+  dword size=sizeof(FCB); 
+  dword offset=SIZE_VOLUME+MAX_PATH;
+  int new_off=0;  
+  int r=0; 
+  
+  flog(LOG_WARN,"LSEEK"); 
+  
+  if (  fd<0 || fd>=MAX_FILE ) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  
+  if(!(file=mem_alloc(SIZE_FCB,1))){
+    set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+    return -ENOMEM; 
+  } 
+ 
+  
+  memset(file,0,SIZE_FCB); 
+  //leggo il file control block 
+  if ((r=io_space_read(offset+(fd*SIZE_FCB),file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(file); 
+    return -r; 
+  }
+  flog(LOG_WARN,"LSEEK %d", new_off); 
+  
+ 
+   if((new_off=lseek_fcb(file, new_offset, whence)) < 0 ) { 
+     perror("LSEEK");  
+     mem_free(file); 
+     return new_off; 
+   }
+  flog(LOG_WARN,"LSEEK %d", new_off); 
+  
+
+   if ((r=io_space_write(offset+(fd*SIZE_FCB),file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(file); 
+    return -r; 
+   }
+
+  flog(LOG_WARN,"LSEEK %d", new_off); 
+    mem_free(file); 
+    reset_errno(); 
+    return new_off; 
+    
+}
+   
+ 
+ 
+int lseek_fcb( FCB * file, int offset, int whence){ 
+
+  
+   
+  if ( file == NULL  || whence <0) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  if ( !file->volume || !file->cluster_father) { 
+    set_errno(EINVAL,"FCb errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+    
+   
+  if (IS_SEEK_SET(whence)) { 
+    
+      //riferimento all'inizio del file 
+      if (offset < 0 ){ 
+	   set_errno(EINVAL,"Offset errato (%s-line%d)", __FILE__, __LINE__); 
+	  return -EINVAL;
+      }
+      // può essere maggiore della grandezza del file 
+      // è in quel caso vien esteso dalla write successiva 
+      file->pos_corr=offset; 
+    
+  }else if ( IS_SEEK_CUR (whence)) {
+      //riferimento alla posizione corrente 
+      file->pos_corr+=offset; 
+  }
+  else if ( IS_SEEK_END(whence)) {
+    //riferimento alla fine 
+   file->pos_corr=file->size; 
+   file->pos_corr+=offset; 
+  }
+    
+  else {   
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+ 
+   return file->pos_corr; 
+  
+}
+
+
+// elimina un file 
+// se qualche processo usa il file , questo viene eliminato lo stesso 
+// sta al programattore evitare che questa sistuazione di veriochi 
+int c_unlink ( const char * path) { 
+ 
+   dword size=sizeof(FCB); 
+  dword offset=SIZE_VOLUME+MAX_PATH;
+  FCB file; 
+  int fd=0, r=0; 
+  
+  if (!path) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  // uso la funziona di apertura , verifica anche che non sia una directory
+  if((fd=c_open(path,O_RDWR)) <= 0 ) 
+     return fd; 
+  
+  // se tutto è andato bene ho carico il fcb corretto in memria sistema 
+       //leggo il file control block 
+  if ((r=io_space_read(offset+(fd*SIZE_FCB),&file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    return -r; 
+  }
+  
+  if (!delete_entry(&file)) { 
+      perror("Delete Entry "); 
+      return -1; 
+  }
+   
+  if((r=c_close(fd)) <= 0 ) 
+     return r; 
+  
+  return 0; 
+  
+}
+
+/*Funzione che crea una directory*/ 
+int c_mkdir (const char * path) {
+
+   FCB  file_fcb, 	// FCB del file che dobbiamo aprire
+        father_fcb; 	// FCB della cartella madre 
+  
+   byte volume=0; 
+   char *pwd=NULL,		// contiene la direcotory di lavoro 
+	 *path_assoluto=NULL; 	// Path assoluto della direcotruy che contiene il file
+   char *name_file=NULL; 	// nome del file; 
+   dword r=0; 
+   BOOL  ret=FALSE; 
+   int fd=0; 
+   char new_volume=0;
+   
+
+   
+   flog(LOG_INFO, "MKDIR %s", path ); 
+    
+   if (!(name_file=mem_alloc(MAX_NAME,1))) { 
+          set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+	  return -ENOMEM;
+   }
+   memset(name_file, 0, MAX_NAME); 
+   
+   if(!(path_assoluto=mem_alloc(MAX_PATH, 1))) {
+	  set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+	  mem_free(name_file); 
+	  return -ENOMEM;
+   }
+   memset(path_assoluto, 0, MAX_PATH );
+   
+   if(!(pwd=mem_alloc(MAX_PATH, 1))) {
+	set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+	 mem_free(name_file); 
+	 mem_free(path_assoluto); 
+	 return -ENOMEM;
+   }
+   memset(pwd, 0, MAX_PATH );
+
+   memset(&father_fcb, 0, SIZE_FCB );
+   memset(&file_fcb, 0, SIZE_FCB);
+   
+   // prelevo informazioni dall'area privata del processo 
+   
+    // VOLUME 
+     if ((r=io_space_read(ADDR_VOLUME,(byte*)&volume, 1))){
+        set_errno(r, "Errore io_space_read %s", path);
+       goto error_mkdir; 
+     }
+
+     // PWD  
+     if ((r=io_space_read(ADDR_PWD, pwd, MAX_PATH))){
+       set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+       goto error_mkdir; 
+     }
+
+    //estraggo il nome della directory e modifico il path  
+    if(!get_name((char*)path, name_file,MAX_NAME)) { 
+       set_errno(EINVAL, "Nome file non corretto %s", path); 
+       goto error_mkdir; 
+    } 
+    
+   flog(LOG_WARN, "Path %s name %s", path, name_file); 
+   
+   new_volume=volume; 
+   
+   // elaboro il path 
+   
+   if (!get_new_volume(path, &new_volume)) {
+      perror("VOLUME "); 
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      goto error_mkdir; 
+   }
+   
+   //estraggo il path assoluto 
+   if(!create_pathassoluto(path, pwd, path_assoluto)){
+       perror("PATH "); 
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      goto error_mkdir; 
+  }
+
+  flog(LOG_WARN,"VOLUME %c PATH ASSOLUTO : %s",new_volume, path_assoluto); 
+
+  //prelevo il fcb del padre e verifico la consistenza del path 
+  
+  if(!get_fcb_father(new_volume, path_assoluto, &father_fcb)) {
+	perror("PADRE"); 
+       set_errno(EINVAL, "Path file non corretto %s", path); 
+       goto error_mkdir; 
+  }
+  
+  
+   print_fcb(&father_fcb); 
+
+  // vwerifico che non esista un nome questo 
+  ret=open_entry(name_file, &father_fcb, &file_fcb); 
+
+  //gestione errori
+  
+  //CREAZIONE DELL?ENTRY 
+  
+  if ( ret ) {
+    set_errno(EEXIST, "DIR Exist %s", name_file); 
+    goto error_mkdir; 
+  } else { 
+     // gestisco creazione del file 
+     flog(LOG_WARN,"creo la directory, %s", name_file);
+     
+      if(!create_entry(name_file,ATTR_DIRECTORY, &father_fcb, &file_fcb)) { 
+  	  perror("Creazione entry"); 
+	  goto error_mkdir; 
+        }else 
+      flog(LOG_DEBUG, "creazione avenuta"); 
+ 		
+  }
+  
+  
+  
+  //CREAZIONE DOT DOTDOT 
+  flog(LOG_DEBUG, "Format");
+  
+   if (!format_directory(&file_fcb)) {
+     perror("FORMAT ENTRY"); 
+     goto error_mkdir; 
+   }
+   
+  flog(LOG_DEBUG, "MKDIR terminata rmd	"); 
+
+  print_fcb(&file_fcb);
+    
+  mem_free(name_file); 
+  mem_free(path_assoluto); 
+  mem_free(pwd);
+  return 0; 
+  
+error_mkdir:
+  mem_free(name_file); 
+  mem_free(path_assoluto); 
+  mem_free(pwd);
+  return -1; 
+}
+
+
+
+
+BOOL create_pathassoluto(const char *path, const char * pwd, char *path_assoluto) {
+
+   char * double_dot=NULL; 
+   char path_temp[MAX_PATH];  
+   char * token=NULL; 
+  
+   if ( !path  || !pwd || !path_assoluto) {
+     set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+     return FALSE;
+   } 
+ 
+    memset(path_temp,0, MAX_PATH); 
+    memset(path_assoluto,0, MAX_PATH); 
+
+   
+    
+    
+    if ((double_dot=strchr(path, ':'))) {  // se è zero non è stato specificato nessun volume 
+	
+	 flog(LOG_DEBUG,"PATH %s", double_dot); 
+
+	if(*(double_dot+1) != '/' || double_dot==path) {
+	  set_errno(EINVAL,"Path errato (%s-line%d)", __FILE__, __LINE__); 
+	  return FALSE;
+	}
+	
+	strncpy(path_temp, (double_dot+1), MAX_PATH); 
+    }else if ( *path== '/')  { 
+	strncpy(path_temp, path, MAX_PATH); 
+    } else 
+    { 
+	strncpy(path_temp, pwd, MAX_PATH);
+	strncat(path_temp, path, MAX_PATH-strlen(path_temp)); 
+    }
+    
+    
+    flog(LOG_WARN,"OLD PATH %s", path_temp);
+    
+    // ora creaiamo il path assoluto 
+    
+    token=strtok(path_temp, "/"); 
+    
+    while(TRUE) {
+    
+      if (!token) { 				// FINE
+	   strcat(path_assoluto, "/"); 
+	   break; 
+      }	
+      else if(!strncmp(token, ".", 2)) {		// DOT 
+	  token=strtok(NULL, "/"); 
+	  continue; 
+      }
+      else if(!strncmp(token, "..", 3)) { 	// DOT DOT 
+	  // devo eliminare il token precedente 
+	  // devo fare in modo che alla prossima scrittura si sovrascriva 
+	  char *chr=NULL; 
+	  int size=0; 
+	  
+	  chr=strrchr(path_assoluto, '/');
+	  flog(LOG_DEBUG, "CHR %s", chr); 
+	  size=strlen(chr); 
+	  memset(chr, 0, size);		//elimino  token  
+	  token=strtok(NULL, "/"); 
+      }
+      else { 
+	  strncat(path_assoluto, "/",MAX_PATH-strlen(path_assoluto)); 
+	  strncat(path_assoluto, token, MAX_PATH-strlen(path_assoluto));   
+	  token=strtok(NULL, "/"); 
+      }
+	
+    }// while 
+    
+    flog(LOG_WARN, "NUOVO PATH %s", path_assoluto); 
+    
+
+    return TRUE; 
+}
+
+
+/*Funzione che convalida il path, verificando la presenza del file e che siano directory */ 
+
+BOOL validate_path(byte volume, const char * path_assoluto) {
+ 
+  char * my_path=NULL,*token=NULL; 
+  FCB padre,figlio; 
+  TABELLA_VOLUMI *vol=NULL; 
+  
+  if(!(my_path=mem_alloc(MAX_PATH,1))) {
+      set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+      return FALSE; 
+    }
+   
+   memset((void*)my_path, 0, MAX_PATH );
+   memset(&padre, 0, sizeof(FCB)); 
+   memset(&figlio,0, sizeof(FCB)); 
+   strncpy(my_path, path_assoluto, MAX_PATH); 
+   
+  if(!(vol=get_volume(volume))) { 
+    set_errno(EINVAL,"Errore volume (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(my_path); 
+    return FALSE; 
+   }
+   
+   memcpy((void*)&padre, &vol->fcb_root, SIZE_FCB); 
+   memcpy((void*)&figlio, &vol->fcb_root, SIZE_FCB); 
+   
+   token=strtok(my_path, "/"); 
+   
+   while(token) {
+      flog(LOG_INFO, "tok : %s", token); 
+      
+      if((!open_entry(token,&padre,&figlio))) {	// prima fa la fuznione  
+	set_errno(EINVAL,"Errore path (%s-line%d)", __FILE__, __LINE__); 
+	 mem_free(my_path); 
+	 return FALSE; 
+      }
+      
+    
+      if(figlio.type!=ATTR_DIRECTORY) {	// prima fa la fuznione  
+	 set_errno(EINVAL,"Errore path (%s-line%d)", __FILE__, __LINE__); 
+	 mem_free(my_path); 
+	 return FALSE; 
+      }
+      
+      flog(LOG_DEBUG, "Name %s", figlio.name); 
+      memcpy(&padre, &figlio, SIZE_FCB); 
+      
+      token=strtok(NULL, "/"); 
+     
+   }
+   
+   
+   mem_free(my_path); 
+   return TRUE; 
+   
+}  
+
+
+
+int c_rmdir (const char *pathname) {}
+
+
+
+
+// SYSTEM CALL CHWE EFFETTUA IL CAMBIO DELLA DIRECTORY DI LAVORO 
+// il path deve essere scpèecificato nella seguente forma 
+// [c]:/directroy/file 
+
+int c_chdir (const char * path) {
+  
+  
+   FCB * file_fcb=NULL, 	// FCB del file che dobbiamo aprire
+       * father_fcb=NULL; 	// FCB della cartella madre 
+  
+   byte volume=0; 
+   char *pwd=NULL,		// contiene la direcotory di lavoro 
+	 *path_assoluto=NULL; 	// Path assoluto della direcotruy che contiene il file
+   char *name_file=NULL; 	// nome del file; 
+   dword r=0; 
+   BOOL  ret=FALSE; 
+   int fd=0; 
+   char new_volume=0; 
+ 
+   
+   flog(LOG_INFO, "CHDIR path %s", path ); 
+   
+   if (!(name_file=mem_alloc(MAX_NAME,1))) { 
+          set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+	  return -ENOMEM;
+   }
+   memset(name_file, 0, MAX_NAME); 
+   
+   if(!(path_assoluto=mem_alloc(MAX_PATH, 1))) {
+	  set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+	  mem_free(name_file); 
+	  return -ENOMEM;
+   }
+   memset(path_assoluto, 0, MAX_PATH );
+   
+   if(!(pwd=mem_alloc(MAX_PATH, 1))) {
+	set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+	 mem_free(name_file); 
+	 mem_free(path_assoluto); 
+	 return -ENOMEM;
+   }
+   memset(pwd, 0, MAX_PATH );
+
+   // prelevo informazioni dall'area privata del processo 
+   
+   // VOLUME 
+    if ((r=io_space_read(ADDR_VOLUME,(byte*)&volume, 1))){
+       set_errno(r, "Errore io_space_read %s", path);
+      goto error_chdir; 
+    }
+    // PWD  
+    if ((r=io_space_read(ADDR_PWD, pwd, MAX_PATH))){
+      set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+      goto error_chdir; 
+    }
+    
+   flog(LOG_DEBUG, "Path %s Volume %c", pwd, volume ); 
+   
+   // estraggo il volume dal path 
+   
+   
+   new_volume=volume; 
+   if (!get_new_volume(path, &new_volume)) {
+      perror("VOLUME "); 
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      goto error_chdir; 
+   }
+   
+   //estraggo il path assoluto 
+   if(!create_pathassoluto(path, pwd, path_assoluto)){
+       perror("PATH "); 
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      goto error_chdir; 
+  }
+  
+  // convalido il path  
+   if (!validate_path(new_volume, path_assoluto)) { 
+     perror("PATH "); 
+       set_errno(EINVAL, "Path file non corretto %s", path); 
+       goto error_chdir; 
+   }
+  
+  flog(LOG_WARN,"VOLUME %c PATH ASSOLUTO : %s",new_volume, path_assoluto); 
+
+  //inserisco il nuovo path in memoria 
+        
+  if ((r=io_space_write(ADDR_PWD, path_assoluto, MAX_PATH))){
+      set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+       goto error_chdir;
+   }
+ 
+          
+  if ((r=io_space_write(ADDR_VOLUME, &volume, 1))){
+      set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+       goto error_chdir;
+   }
+ 
+  
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return 0; 
+ 
+  
+error_chdir: 
+    mem_free(name_file); 
+    mem_free(path_assoluto); 
+    mem_free(pwd);
+    return -1; 
+} 
+
+
+// system call che riporta la directory corrente 
+
+
+char *c_getcwd(char *buf, size_t size) {
+
+ char volume[2]; 
+ char path[MAX_PATH]; 
+ int r=0; 
+  
+  if ( buf==NULL || size <0) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  memset(path,0,MAX_PATH); 
+  memset(volume,0,2); 
+   // prelevo informazioni dall'area privata del processo 
+  // volume
+   if ((r=io_space_read(0,(byte*)volume, 1))){
+      set_errno(r, "Errore io_space_read %s", path);;
+      return -1; 
+   }
+   // directory corrente 
+   if ((r=io_space_read(ADDR_PWD, path, MAX_PATH))){
+      set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+      return -1; 
+   }
+   
+  memset(buf,0,size); 
+  strncat(buf, volume, size); 
+  strncat(buf, ":", size-strlen(buf));
+  strncat(buf, path, size-strlen(buf));
+  
+  return buf; 
+}
+
+
+
+
+
+
+
+  
+  
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+int  test_system_call()
+{
+
+   FCB * file_fcb=NULL, 	// FCB del file che dobbiamo aprire
+       * father_fcb=NULL; 	// FCB della cartella madre 
+  
+   byte volume=0; 
+   char *pwd=NULL,		// contiene la direcotory di lavoro 
+	 *path_assoluto=NULL; 	// Path assoluto della direcotruy che contiene il file
+   char *name_file=NULL; 	// nome del file; 
+   dword r=0; 
+   BOOL  ret=FALSE; 
+   int fd=0; 
+   
+   char * path="/"; 
+   
+   flog(LOG_INFO, "path %s", path ); 
+   
+   name_file=mem_alloc(MAX_NAME,1);  
+   memset(name_file, 0, MAX_NAME); 
+   path_assoluto=mem_alloc(MAX_PATH, 1);
+   memset(path_assoluto, 0, MAX_PATH );
+   pwd=mem_alloc(MAX_PATH, 1);
+   memset(pwd, 0, MAX_PATH );
+
+   // prelevo informazioni dall'area privata del processo 
+//   // volume
+//    if ((r=io_space_read(0,(byte*)&volume, 1))){
+//       set_errno(r, "Errore io_space_read %s", path);;
+//       mem_free(name_file); 
+//       mem_free(path_assoluto);
+//       mem_free(pwd); 
+//       return -1; 
+//    }
+//    // directory corrente 
+//    if ((r=io_space_read(ADDR_PWD, pwd, MAX_PATH))){
+//       set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+//       mem_free(name_file); 
+//       mem_free(path_assoluto);
+//       mem_free(pwd); 
+//       return -1; 
+//    }
+//    
+   flog(LOG_DEBUG, "path %s volume %c", pwd, volume ); 
+   
+   //estraggo il nome della directory 
+   if(!get_name(path, name_file, MAX_NAME)) { 
+      set_errno(EINVAL, "Nome file non corretto %s", path); 
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return -EINVAL; 
+   } 
+   
+   //estraggo il path assoluto 
+   if(!get_path(path, pwd, path_assoluto)){
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return -EINVAL; 
+  }
+  
+  flog(LOG_WARN,"PATH ASSOLUTO : %s", path_assoluto); 
+  
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+}
+
+
+/*
+ * 
+   //estraggo il path assoluto 
+   if(!get_path(path, pwd, path_assoluto)){
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return -EINVAL; 
+  }
+  
+  
+flog(LOG_DEBUG, "nome %s path %s", name_file, path_assoluto); 
+ 
+  father_fcb=mem_alloc(sizeof(FCB),1); 
+  file_fcb=mem_alloc(sizeof(FCB),1); 
+  memset(father_fcb,0,sizeof(FCB)); 
+  memset(file_fcb,0,sizeof(FCB)); 
+
+  
+  //prelevo il fcb del padre
+  if(!get_fcb_father(volume, path_assoluto, father_fcb)) {
+       set_errno(EINVAL, "Path file non corretto %s", path); 
+//       goto errore_open; 
+  }
+  
+    print_fcb(father_fcb);
+
+  ret=open_entry(name_file, father_fcb, file_fcb); 
+  
+  
+  
+  
+  if ( ret ) {
+    set_errno(EEXIST, "DIR Exist %s", name_file); 
+//    goto errore_mkdir; 
+  }else { 
+     // gestisco creazione del file 
+     flog(LOG_WARN,"creo la directory, %s", name_file);
+      if(!create_entry(name_file,ATTR_DIRECTORY, father_fcb, file_fcb)) { 
+  	  perror("Creazione entry"); 
+//	  goto errore_open; 
+        }else 
+ 	flog(LOG_DEBUG, "creazione avenuta"); 
+  }
+  
+  //ora devo creare i do dot 
+  // creare il nuovo cluster per la directory 
+  /*create_fat
+  
+  creare dot dot dot 
+  */
+  
+
+#include <volumi.h>
+#include <type.h> 
+#include <sistema.h>
+#include <direntry.h>
+
+BOOL  aggiungi_partizione ( TABELLA_VOLUMI ** tabella, natl ata, natl disco, natl indice) ;
+void stampa_entry_tabella_volumi(const TABELLA_VOLUMI *); 
+
+extern TABELLA_VOLUMI * tabella; 
+
+TABELLA_VOLUMI * crea_tabella_volumi() { 
+
+  // per prima cosa devo prelevare la lista delle partizioni 
+  // L'insieme  delle partizioni è inserito nei descittori di interfaccia dei vari device 
+  // Questo kernel al massimo puo gestire 4 hardisk ( 2 per ogni canale ATA ) 
+  // per fare questo uso una routine di LIV_KERNEL che rende una partizione una per volta 
+
+  TABELLA_VOLUMI *tabella=NULL; 
+  int indice_partizione=0; 
+  int i,j,indice=0; 
+
+   // dischi li classifichiamo com hda hdb hdc hdd 
+   // l'indirizzo zero nelle catene identifica il disco, quindi le varie partzioni 
+   // partono da 1 e cosi via
+
+   
+   for ( i=0; i<N_ATA; i++ )   { 
+      for ( j=0; j<N_DISK; j++)  {
+	flog(LOG_WARN, "DISCO : %d %d", i,j);
+	  
+	    for (  indice=0; ; indice++) 
+	        if ((indice_partizione=get_partizione(i,j, FAT32, indice)) == -1) 
+	           break; 
+		else { 
+		  indice=indice_partizione;
+		     flog(LOG_WARN, "Partizione FAT32 %d", indice_partizione); 
+		      aggiungi_partizione(&tabella, i, j, indice_partizione); 	
+		   }
+
+	    for (  indice=0; ; indice++) 
+	        if ((indice_partizione=get_partizione(i,j, FAT16, indice)) == -1) 
+	           break; 
+		else {
+		    indice=indice_partizione;
+		     aggiungi_partizione(&tabella,i,j,indice_partizione); 
+		    flog(LOG_WARN, "Partizione FAT16 %d", indice_partizione); 
+		  }
+
+	    for ( indice=0; ; indice++) 
+	        if ((indice_partizione=get_partizione(i,j, FAT12, indice)) == -1) 
+	           break; 
+		else {
+		   indice=indice_partizione;
+		    aggiungi_partizione(&tabella,i,j, indice_partizione); 
+		   flog(LOG_WARN, "Partizione FAT12 %d", indice_partizione); 
+	    
+		   }
+      }  
+      }
+
+   
+  return tabella; 
+        
+}
+
+
+BOOL  aggiungi_partizione ( TABELLA_VOLUMI ** tabella, natl ata, natl disco, natl indice) {
+
+  BPB *  bpb=(BPB*)mem_alloc(BPB_SIZE, 1);  // informazioni volume fat
+  TABELLA_VOLUMI *new_tabella=(TABELLA_VOLUMI* )mem_alloc(sizeof(TABELLA_VOLUMI),1); 
+  static byte label='C'; 
+
+  memset(bpb, 0, BPB_SIZE);
+  memset(new_tabella,0, sizeof(TABELLA_VOLUMI));
+
+  /*NB la grandezza */ 
+
+  byte  set_for_cluster=0;
+  word  root_dir_sector=0; 
+  word  byts_for_sect=0;
+  word  n_sect_reserved=0; 
+  word  n_ent_root=0;
+  byte  n_FAT=0;
+  dword data_size; 
+  dword FAT_size=0;  
+  dword tot_settori=0;  
+  dword data_size_cluster=0; 
+  dword last_set_data=0; 
+  dword first_set_data=0; 
+  dword first_set_FAT=0; 
+
+    if(tabella==NULL) {
+      mem_free(new_tabella); 
+      mem_free(bpb); 
+      return FALSE;
+    } 
+
+      new_tabella->next=*tabella; 
+    *tabella=new_tabella; 
+   
+   
+  // Leggo il BPB  // 
+    if(read_part_n(ata, disco, indice , 0, 1, (void*)bpb) < 0 ) 
+      flog(LOG_WARN , "ERRORE READ "); 
+  
+ // VERIFICO SE É IL SETTORE DI BOOT 
+    if( check_boot_sector((MBR *)bpb) == TRUE)
+         flog(LOG_WARN, "BPB correct\n"); 
+    else {
+         flog(LOG_WARN, "BPB incorrent\n"); 
+    }
+  
+    // inserisco i dati record dalla tabella dei volumi; 
+    
+    /* Gestione settori e Cluste */
+    set_for_cluster=bpb->BPB_SecPerClus;
+    byts_for_sect=bpb->BPB_BytsPerSec; 
+    n_FAT=bpb->BPB_NumFATs; 
+     FAT_size=FATsize(bpb->BPB_FATSz16,bpb->bpb_32.BPB_FATsz32);
+    n_sect_reserved=bpb->BPB_RsvdSecCnt;
+    n_ent_root=bpb->BPB_RootEntCnt; 
+    first_set_FAT=FirstSectFAT( n_sect_reserved);
+    tot_settori=TotSector(bpb->BPB_TotSec16, bpb->BPB_TotSec32);
+
+    /* Gestione regione dati */
+    flog(LOG_WARN, " Settori Riservati %d  n_fat  %d, Fat Size %d",  n_sect_reserved, bpb->BPB_NumFATs, FAT_size);
+
+     data_size=DataSize( tot_settori, n_sect_reserved, bpb->BPB_NumFATs, FAT_size, root_dir_sector); 
+    data_size_cluster=DataSizeCluster( data_size, set_for_cluster); 
+    first_set_data= FirstDataSector( n_sect_reserved,n_FAT, FAT_size,root_dir_sector); 
+    last_set_data = first_set_data + data_size;     
+
+    new_tabella->type_fs=getFileSystemType (data_size_cluster);
+    new_tabella->ata=ata; 
+    new_tabella->disco=disco; 
+    new_tabella->indice_partizione=indice; 
+    new_tabella->label=label;
+
+    label++; // incremento l'eticheta; 
+
+    new_tabella->fat_info.sectors_for_cluster=set_for_cluster; 
+    new_tabella->fat_info.byts_for_sector=bpb->BPB_BytsPerSec;
+  
+    new_tabella->fat_info.first_set_data=first_set_data; 
+    new_tabella->fat_info.size_data=data_size; 
+    flog(LOG_DEBUG, "Settore data %d", first_set_data); 
+    tot_settori=TotSector(bpb->BPB_TotSec16, bpb->BPB_TotSec32);
+ 
+    
+    new_tabella->fat_info.first_set_fat=first_set_FAT; 
+    new_tabella->fat_info.size_fat=FAT_size; 
+
+    new_tabella->fat_info.first_cluster_directory= (bpb->bpb_32.BPB_RootClus); 
+
+    new_tabella->semaphore=sem_ini(1); // mutua esclusione 
+  
+    memset(&(new_tabella->fcb_root), 0, sizeof(FCB)); 
+    new_tabella->fcb_root.semaphore=sem_ini(MUTEX); 
+    new_tabella->fcb_root.cluster=ROOT_CLUSTER; 
+    new_tabella->fcb_root.volume=new_tabella->label; 
+    new_tabella->fcb_root.type=ATTR_DIRECTORY; 
+   //new_tabella->fcb_root.cluster_father=ROOT_CLUSTER; 
+   // new_tabella->fcb_root.offset_father=0; 
+   // new_tabella->fcb_root.n_entry=0; 
+
+    return FALSE; 
+}
+
+ 
+ void stampa_tabella_volumi( const TABELLA_VOLUMI * list) { 
+  if ( list == NULL) 
+    return; 
+  
+  stampa_entry_tabella_volumi(list); 
+  stampa_tabella_volumi(list->next); 
+} 
+
+ void stampa_entry_tabella_volumi(const TABELLA_VOLUMI * l) {
+  
+
+  flog(LOG_DEBUG, " \nLabel :              %c", l->label); 
+  flog(LOG_DEBUG, " ATA        :             %x", l->ata); 
+  flog(LOG_DEBUG, " DISCO  :             %x", l->disco); 
+  flog(LOG_DEBUG, " TYPE     :             %x", l->type_fs);
+  flog(LOG_DEBUG, " Byte for sector       : %x", l->fat_info.byts_for_sector);
+  flog(LOG_DEBUG, " Sector for cluster  : %x", l->fat_info.sectors_for_cluster);
+  flog(LOG_DEBUG, " Partizione               : %x", l->indice_partizione); 
+  flog(LOG_DEBUG, " First FAT sector     : %x",l->fat_info.first_set_fat); 
+  flog(LOG_DEBUG, " FAT size                  : %x", l->fat_info.size_fat); 
+  flog(LOG_DEBUG, " First Data sector   : %x", l->fat_info.first_set_data);
+  flog(LOG_DEBUG," CLuster                  : %x ",  l->fat_info.first_cluster_directory); 
+  flog(LOG_DEBUG, " DATA size               : %x\n", l->fat_info.size_data); 
+
+}
+
+TABELLA_VOLUMI * get_volume ( byte label) { 
+  
+  TABELLA_VOLUMI * tmp=tabella; 
+
+  if ( label  < 'C' ) 
+    return NULL; 
+
+  while ( tmp )
+    if ( tmp->label == label)  
+      return tmp; 
+    else  
+      tmp=tmp->next; 
+
+  set_errno("Volume non trovato");  
+  return NULL; 
+
+} 
+
+

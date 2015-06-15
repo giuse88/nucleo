@@ -1,0 +1,31 @@
+
+#include <sys.h>
+#include <lib.h>
+
+
+process proc_ps body path(3), 11, LIV_UTENTE;
+
+#define MAX_PATH 260
+
+
+
+process_body path(int a)
+{
+
+
+      char * buf=(char*)mem_alloc(MAX_PATH); 
+
+    while (1)  {
+
+      vterm_setcolor(a, COL_GREEN, COL_BLACK);
+      printf(a, "%s : ", getcwd(buf, MAX_PATH));
+      vterm_setcolor(a, COL_WHITE, COL_BLACK);
+      readvterm_ln(a, buf, MAX_PATH);
+
+      if ( chdir(buf) < 0 ) 
+	perror(a,"CHDIR"); 
+      
+    }
+}
+
+

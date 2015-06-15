@@ -1,0 +1,23 @@
+\chapter{Introduzione}
+\label{chap:Intro}
+\section{Obiettivo}
+L'elaborato si propone di descrivere in maniera generale la realizzazione del supporto per il file system in un nucleo multiprogrammato.
+\section{Struttura dell'elaborato}
+La relazione si compone di 6 capitoli e un appendice. 
+Nel capitolo \ref{cap:FileSystem} si effettua una panoramica generale sul concetto di file system e sulle sue caratteristiche generali.\\
+Nel capitolo \ref{cap:Fat}, si descrive con particolare cura il funzionamento del FAT32, mettendo in evidenza le strutture dati di cui e composto e le procedure necessarie per un suo corretto funzionamento. 
+Dopo l'introduzione del concetto di file sytem e FAT32, nel capitolo  \ref{cap:Requisiti}, si presentano gli obbiettivi del software evidenziando il punto vista dell'utente finale. In questo capitolo analizziamo e sintetizziamo i requisiti utente e software. 
+Gli ultimi due capitoli trattano la realizzazione del file system da un punto di vista progettuale. Nel capitolo \ref{cap:Modifiche} si mettono in evidenza tutte le modifiche che sono state introdotte nel nucleo. 
+L'ultimo capitolo, individuato dal numero \ref{cap:Struttutra_Progetto} presenta l'architettura software generale del sistema, mettendo in evidenza i moduli di cui è composto. 
+
+\section{Come Leggere l'elaborato}
+Prima di affrontare la lettura di questo elaborato bisogna evidenziare alcuni concetti che verranno usati spesso nell'elaborato. 
+\begin{itemize}
+  \item Nucleo, quando si fa riferimenti al nucleo, si intende il nucleo didattico del Prof. Frosini e Prof. Lettieri, reperibile presso http://calcolatori.iet.unipi.it/. 
+  \item Utente, quando si fa riferimento ad un utente, si intende un utilizzatore del nucleo sopracitato. Si assume che l'utente abbia competenze necessarie all'avvio del nucleo e alla scrittura di programmi per questo. 
+  \item Sistema, quando si userà il termine sistema, si riferisce al sistema file system FAT 32 oggetto della tesi. 
+  \item File system, quando si fa riferimento al file system si intende sempre il FAT 32.  
+  \item I termini Partizione e Volume verranno usati come sinonimi. 
+\end{itemize}
+
+   

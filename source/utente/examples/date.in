@@ -1,0 +1,23 @@
+#include <sys.h>
+#include <lib.h>
+
+process proc_timer body body_timer(2), 10, LIV_UTENTE;
+
+process_body body_timer(int a)
+{
+
+	unsigned int time = get_time(); 
+	unsigned int date = get_date(); 
+
+	printf(a, "L'ora e' : ", time); 
+	printf(a, "%d:",(time & 0x00FF0000) >> 16); 
+	printf(a, "%d:",(time & 0x0000FF00) >> 8); 	
+	printf(a, "%d\n",time & 0x000000FF); 	
+
+	printf(a, "La data  e' :  ", date);
+        printf(a, "%d/", date & 0x000000FF);
+        printf(a, "%d/",(date & 0x0000FF00) >> 8);
+        printf(a, "20%d\n",(date & 0x00FF0000) >> 16);
+
+	
+}

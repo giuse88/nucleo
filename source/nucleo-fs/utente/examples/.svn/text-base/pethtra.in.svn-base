@@ -1,0 +1,81 @@
+#include <sys.h>
+#include <lib.h>
+
+/*
+*
+* Programma transmit
+* Trasmissione di un frame ethernet
+*
+*/
+
+#define PAYLOAD_LEN 100;
+
+natb* frame;
+ETH_ERR status;
+
+process proc_eth_transmit body p_eth_tra(2), 200, LIV_UTENTE;
+
+process_body p_eth_tra(int a) {
+
+	//calcolo lunghezza del payload
+	natl plen = sizeof(natb)*PAYLOAD_LEN;
+	
+	//calcolo lunghezza totale frame (plen + 6 (DA) + 6 (SA) + 2 (LEN))
+	natl tlen = plen + 14;
+	printf(a, "Processo di prova invio\n");
+	printf(a, "La lunghezza del payload e` %d.\n", plen);
+	
+	frame = (natb*) mem_alloc(tlen);
+	memset(frame, 0xff, tlen);
+
+   /* +------+------+---+-------------+
+      |  DA  |  SA  |LEN|   PAYLOAD   |
+	  +------+------+---+-------------+ 
+   */
+
+	//receiver mac-addr=00:16:d4:fb:95:fe
+	frame[0] = 0x00;
+	frame[1] = 0x16;
+	frame[2] = 0xd4;
+	frame[3] = 0xfb;
+	frame[4] = 0x95;
+	frame[5] = 0xfe;
+
+	//transmitter mac-addr=00:16:d4:fb:95:fd
+	frame[6] = 0x00;
+	frame[7] = 0x16;
+	frame[8] = 0xd4;
+	frame[9] = 0xfb;
+	frame[10] = 0x95;
+	frame[11] = 0xfd;
+	
+	natw* len = (natw*) &frame[12];
+	*len = static_cast<natw>(plen);
+	
+	printf(a, "Trasmissione in corso...\n");
+	eth_transmit(0, frame, tlen, status);
+	
+	
+	switch (status) {
+		case TX_OK:
+			printf(a, "\n|");
+			for (int i = 0; i < tlen; i++)
+				printf(a, "0x%2x|", (char) frame[i]);
+			
+			mem_free(frame);
+			printf(a, "\n\nInvio completato con successo.\n");
+		break;
+		
+		case TX_ERROR:
+			printf(a, "Si e` verificato un errore nella trasmissione del frame.\n");
+		break;
+		
+		case SYSTEM_ERROR:
+			printf(a, "Errore interno della scheda.\n");
+		break;
+		
+		default:
+			printf(a, "Impossibile inviare il frame.\n");
+	}	
+
+}

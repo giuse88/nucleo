@@ -1,0 +1,76 @@
+#ifndef FS_H 
+#define FS_H 
+
+
+// alineo la struttura a quattro byte 
+#define ADDR_VOLUME 0
+#define ADDR_PWD    4
+#define ADDR_FCB    264 
+
+#define MAX_FILE 3 
+#define SIZE_VOLUME 4 
+#define MUTEX 1
+#define ROOT_CLUSTER 2
+/*struttre che mi permettono l'astrazzione del file system*/ 
+
+
+typedef struct _FCB_ FCB;
+
+struct _FCB_{ 
+  
+  char name[260];	 //nome lungo del file
+  
+  //posizione data 
+  
+  byte volume; 
+  dword cluster; 	//primo cluster data 
+  
+  // info file 
+  
+  byte type;		// flag 
+  byte mode; 		//modalita 
+  dword pos_corr;   	// posizione corrente   	
+  dword semaphore; 	//semaphore per le directory 
+
+  //info directory padre
+
+  dword cluster_father; 	//cluster del padre 
+  lword offset_father;          // offset in byte nel padre 
+  word  n_entry; 		// n_entry di cui è composto 
+  
+  
+  // info fileSystem
+  
+  word CrtTime ; 	 // ora di creazione 
+  word CrtDate; 	 // data di creazione 
+  word LstAccDate; 	 // Ultimo accesso
+  word WrtTime ;  	 // ora di scrittura 
+  word WrtDate;		 // data discrittura
+  dword size; 		 // grandezza file
+  
+}; 
+
+
+typedef struct _DIRECTORY_ DIRECTORY; 
+
+struct _DIRECTORY_ { 
+
+  char path[255]; 
+  char name [255]; 
+
+  byte dispositivo; // servono per essere generale  
+  byte fileSystem;  // idem 
+
+  byte loock; // 
+  byte mode;  // inutili in questo caso 
+
+  void * physic_des; // (puo puntare ad una cluster fat o un indoe ext ) 
+  
+
+}; 
+
+
+
+
+#endif 
+

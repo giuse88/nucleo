@@ -1,0 +1,1490 @@
+/* SYSTEM CALL */ 
+
+#include "string.h" 
+#include "direntry.h" 
+#include "fs.h" 
+#include "errno.h" 
+#include "volumi.h" 
+#include "system_call.h"
+
+
+
+
+BOOL create_pathassoluto(const char *path, const char * pwd, char *path_assoluto);
+
+// void split_dword (const dword value, word * low, word * high) {
+// 
+//         *low=(word)(value&0x0000FFFF);
+//         *high=(word)((value&0xFFFF0000)>>16);
+// };
+// 
+// void merge_dword(dword * value, const word low , const word high) {
+// 
+//         *value=((dword)(high)<<16) | (dword)(low);
+// 
+// };
+
+/* Funzione che estre il nome dal path  e lo inserisce su nam e, che deve essere un bu di lunghezza massima oper contenere il nome del file 
+ * 
+ *
+
+
+
+BOOL get_name( const char * path , char * name) {
+  
+  char * token =NULL,* path_tmp=NULL;
+  size_t size_path = strlen(path); 
+  char * r=NULL; 
+  
+  if(!path || !name) 
+      return FALSE; 
+  
+  if(*(path + size_path -1) == '/')
+     return FALSE; 
+  
+  // il path non puo erssere piu lungo di questo 
+  if(size_path >= MAX_PATH)
+    return FALSE; 
+ 
+
+  path_tmp=mem_alloc(MAX_PATH, 1); 
+  memset(path_tmp, 0, MAX_PATH); 
+  strncpy(path_tmp, path, size_path); 
+  
+
+  token=strtok(path_tmp, "/"); 
+  memset(name, 0, MAX_NAME); 
+  strncpy(name, token , strlen(token)); 
+  
+  while (token != NULL)
+  {
+    memset(name, 0, MAX_NAME); 
+    strncpy(name, token , strlen(token)); 
+    token=strtok (NULL, "/");
+  } 
+  
+  
+  flog(LOG_DEBUG,"%s",name);
+  
+  
+  mem_free(path_tmp); 
+  return TRUE; 
+  
+}
+
+*/ 
+
+// funzione che preleva il nome dal path 
+BOOL get_name( char * path , char * name,size_t size_name) {
+
+  char *tok=NULL; 
+  size_t size_path = strlen(path); 
+  
+  if ( !name  || !path) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return FALSE;
+  }
+  
+  if ( !size_path || *(path+size_path-1)=='/') {
+    set_errno(EINVAL,"Nome invalido(%s-line%d)", __FILE__, __LINE__); 
+    return FALSE;
+  }
+ 
+  tok=strrchr(path, '/'); 
+
+  
+  if(!tok){
+    memset(name,0,size_name);
+    strncpy(name,path, size_path);
+    memset(path,0,size_path);
+  }
+  else {
+    strncpy(name, tok+1, size_name); 
+    memset(tok, 0,size_path);  
+  }
+  
+  //bisogna controllare bene i path 
+  
+    return TRUE; 
+    
+}
+
+
+// assumo che pwd termini con una stringa 
+
+BOOL get_path( const char * path,const  char * pwd, char * path_assoluto) { 
+ 
+  
+  if (!path || !pwd  || !path_assoluto ) 
+      return FALSE; 
+  
+  if(*pwd != '/' || *(pwd + (strlen(pwd)-1)) != '/') 
+      return FALSE; 
+  
+  if ( *path == '/') // path è un path assoluto 
+    strncpy(path_assoluto, path, strlen(path)); 
+  else { 
+      strncpy(path_assoluto, pwd, strlen(pwd)); 
+      strncat(path_assoluto, path, strlen(path)); 
+  }
+    
+  return TRUE; 
+}
+
+
+// funzione che estrae il volume dal path è verifica se è presente 
+BOOL get_new_volume(const char * path , char *volume) { 
+  
+  // il volume è formato da una sola lettera e deve essere specificato 
+  // come primo argomento separato da due punti 
+  // C:/
+   
+  if ( path == NULL) { 
+      set_errno(EFAULT,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+      return FALSE;
+  }
+
+
+  if (strchr(path, ':')) {  
+    flog(LOG_DEBUG,"VOLUME %c", *path);
+    if(!get_volume(*path)) { 
+      set_errno(EINVAL,"Volume errato (%s-line%d)", __FILE__, __LINE__); 
+      return FALSE;
+    }else { 
+	*volume=*path; 
+	return TRUE; 
+    }
+    
+  }
+  
+  return TRUE;  
+}
+
+
+
+/*funzione che deve ricercare all'interno delle varie direntry i vari fcB 
+ */ 
+
+#define SIZE_FCB sizeof(FCB) 
+
+BOOL get_fcb_father( byte volume,  char * path_assoluto, FCB* file) { 
+
+  TABELLA_VOLUMI * tab=NULL;
+  char *token=NULL; 
+  FCB *root=NULL, *padre=NULL, *figlio=NULL;
+  char my_path[MAX_PATH]; 
+  
+  if(!path_assoluto || !file || !volume ) {
+    set_errno(ENOMEM, "Errore parametri (%s-line%d)", __FILE__, __LINE__); 
+      return FALSE; 
+  } 
+  
+  tab=get_volume(volume); 
+  
+  if(!tab) {
+    set_errno(ENOMEM, "Errore volume (%s-line%d)", __FILE__, __LINE__); 
+      return FALSE; 
+  } 
+  
+  root=&(tab->fcb_root); 
+  memset(my_path,0,MAX_PATH); 
+  strncpy(my_path,path_assoluto,strlen(path_assoluto)); 
+  
+  
+  if(!(padre=mem_alloc(sizeof(FCB),1))) { 
+      set_errno(ENOMEM, "Errore mem_alloc (%s-line%d)", __FILE__, __LINE__); 
+      return FALSE; 
+  }
+  if(!(figlio=mem_alloc(sizeof(FCB),1))) { 
+      set_errno(ENOMEM, "Errore mem_alloc (%s-line%d)", __FILE__, __LINE__); 
+      mem_free(padre); 
+      return FALSE; 
+  }
+
+
+ memcpy(padre, root, sizeof(FCB)); 
+ memcpy(figlio, root, sizeof(FCB)); 
+ 
+ token=strtok(my_path, "/");
+ 
+ while(token) {
+   flog(LOG_INFO, "tok : %s", token); 
+      
+      if((!open_entry(token,padre,figlio))) {	// prima fa la fuznione  
+	set_errno(EINVAL,"Errore path (%s-line%d)", __FILE__, __LINE__); 
+	 mem_free(my_path); 
+	 return FALSE; 
+      }
+      
+    
+      if(figlio->type!=ATTR_DIRECTORY) {	// prima fa la fuznione  
+	 set_errno(EINVAL,"Errore path (%s-line%d)", __FILE__, __LINE__); 
+	 mem_free(my_path); 
+	 return FALSE; 
+      }
+      
+      flog(LOG_DEBUG, "Name %s", figlio->name); 
+      memcpy(padre, figlio, SIZE_FCB); 
+      token=strtok(NULL, "/"); 
+     
+   }
+   
+  //print_fcb(precedente); 
+   
+   memcpy(file, figlio, SIZE_FCB); 
+   
+ //  print_fcb(file); 
+   
+   file->semaphore=sem_ini(MUTEX); 
+   
+   mem_free(padre); 
+   mem_free(figlio); 
+   
+   return TRUE; 
+  
+}
+
+
+// funzione che inserisce un file control block nello spazio IOSPACE sisteam 
+int list_fcb() {
+
+  
+  dword size=(sizeof(FCB) *MAX_FILE); 
+  dword offset=SIZE_VOLUME+MAX_PATH; 
+  byte * buf = NULL; 
+  int i=0,r=0; 
+  FCB * fcb=NULL; 
+  
+  flog(LOG_INFO,"LIST FCB "); 
+  
+
+    
+  
+  buf=mem_alloc(size, 1); 
+  
+  if (!buf) { 
+   set_errno(ENOMEM, "Memoria insufficiente(%s-line%d)", __FILE__, __LINE__);
+   return -1; 
+  }
+  
+  memset(buf,0,size); 
+ 
+  //leggo il buffer
+  if ((r=io_space_read(offset, buf, size))) { 
+    set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+    mem_free(buf); 
+    return -1; 
+  }
+     
+   fcb=(FCB*)buf; 
+  
+   for ( i=0; i< MAX_FILE; i++, fcb++) {
+    
+	if(!fcb->volume)
+	 continue; 
+	print_fcb(fcb); 
+	
+    }
+  
+   flog(LOG_INFO," FINE LIST FCB "); 
+  return 0; 
+  
+}
+
+//funzione che rimuove un fcb 
+
+int remove_fcb( int indice) {
+
+  
+  dword size=sizeof(FCB); 
+  dword offset=SIZE_VOLUME+MAX_PATH; 
+  byte * buf = NULL; 
+  int i=0,r=0; 
+  FCB * fcb=NULL; 
+
+  flog(LOG_WARN, "Remove "); 
+  
+  if ( indice < 0 || indice >=MAX_FILE) {
+    set_errno(EINVAL, "Parametro non corretto (%s-line%d)", __FILE__, __LINE__);
+    return -1; 
+  }
+    
+  
+  buf=mem_alloc(size, 1); 
+  
+  if (!buf) { 
+   set_errno(ENOMEM, "Memoria insufficiente(%s-line%d)", __FILE__, __LINE__);
+   return -1; 
+  }
+  
+  memset(buf,0,size); 
+ 
+  if ((r=io_space_write(offset+(indice*SIZE_FCB),buf, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(buf); 
+    return -1; 
+  }
+
+   mem_free(buf); 
+   
+  return 0; 
+  
+}
+
+
+
+// funzione che inserisce un FCB nell'area di memoria IOSPACE nella memoria sistem 
+// se trova riporta l'indice
+
+int insert_fcb(const FCB * file) {
+  
+  dword size=(sizeof(FCB) *MAX_FILE); 
+  dword offset=SIZE_VOLUME+MAX_PATH; 
+  byte * buf = NULL; 
+  int i=0,r=0; 
+  FCB * fcb=NULL, *fcb_tmp=NULL; 
+  
+ 
+  if (!file) {
+    set_errno(EINVAL, "Parametro non corretto (%s-line%d)", __FILE__, __LINE__);
+    return -1; 
+  }
+    
+  
+  buf=mem_alloc(size, 1); 
+  
+  if (!buf) { 
+   set_errno(ENOMEM, "Memoria insufficiente(%s-line%d)", __FILE__, __LINE__);
+   return -1; 
+  }
+  
+ 
+  //leggo il buffer
+  if ((r=io_space_read(offset, buf, size))) { 
+    set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+    mem_free(buf); 
+    return -1; 
+  }
+  
+  fcb=(FCB*)buf; 
+  fcb_tmp=(FCB*)buf; 
+  
+  //poichè non sono accorpati possono esistere dei buchi per evitare di aprire lo 
+  // stesso file lo cerco 
+  
+  for ( i=0; i< MAX_FILE; i++, fcb_tmp++) {
+    
+    if (fcb_tmp->volume == 0)  
+	continue; 
+    else if ( fcb_tmp->volume == file->volume && 
+	      fcb_tmp->cluster_father == file->cluster_father &&
+	      !strncmp(fcb_tmp->name, file->name, strlen(fcb_tmp->name))) 
+	      { 
+		set_errno(EEXIST, "File già aperto"); 
+		return -1; 
+	      }
+	      
+  }
+  
+  
+  
+  //scorro finché non trovo una posizione libera 
+  for ( i=0; i< MAX_FILE; i++, fcb++) {
+    
+    //libero
+    if (fcb->volume == 0)  
+	if ((r=io_space_write(offset+(i*SIZE_FCB),file , SIZE_FCB))) { 
+	    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+	    mem_free(buf); 
+	    return -1; 
+	}else {
+	   // print_fcb(file); 
+	    return i; 
+	  }
+  }
+  
+  set_errno(r, "Table file full");
+  mem_free(buf); 
+  return -1; 
+  
+}
+
+
+// funzione che verifica che ci siano poszioni libere prima di una creazione 
+
+
+BOOL free_fcb() {
+  
+  dword size=(sizeof(FCB) *MAX_FILE); 
+  dword offset=SIZE_VOLUME+MAX_PATH; 
+  byte * buf = NULL; 
+  int i=0,r=0; 
+  FCB * fcb=NULL, *fcb_tmp=NULL; 
+  
+   
+  buf=mem_alloc(size, 1); 
+  
+  if (!buf) { 
+   set_errno(ENOMEM, "Memoria insufficiente(%s-line%d)", __FILE__, __LINE__);
+   return FALSE; 
+  }
+  
+  //leggo il buffer
+  if ((r=io_space_read(offset, buf, size))) { 
+    set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+    mem_free(buf); 
+    return FALSE; 
+  }
+  
+  fcb=(FCB*)buf; 
+  fcb_tmp=(FCB*)buf; 
+  
+  //poichè non sono accorpati possono esistere dei buchi per evitare di aprire lo 
+  // stesso file lo cerco 
+  
+  for ( i=0; i< MAX_FILE; i++, fcb_tmp++)     
+    if (fcb_tmp->volume == 0)  
+	return TRUE;      
+   
+   return FALSE; 
+}
+  
+
+
+// apre un file 
+
+
+
+int c_open (const char * path, dword mode) { 
+
+   FCB * file_fcb=NULL, 	// FCB del file che dobbiamo aprire
+       * father_fcb=NULL; 	// FCB della cartella madre 
+  
+   byte volume=0; 
+   char *pwd=NULL,		// contiene la direcotory di lavoro 
+	 *path_assoluto=NULL; 	// Path assoluto della direcotruy che contiene il file
+   char *name_file=NULL; 	// nome del file; 
+   dword r=0; 
+   BOOL  ret=FALSE; 
+   int fd=0; 
+   
+   flog(LOG_INFO, "OPEN path %s  mode %x", path , mode ); 
+   
+   name_file=mem_alloc(MAX_NAME,1);  
+   memset(name_file, 0, MAX_NAME); 
+   path_assoluto=mem_alloc(MAX_PATH, 1);
+   memset(path_assoluto, 0, MAX_PATH );
+   pwd=mem_alloc(MAX_PATH, 1);
+   memset(pwd, 0, MAX_PATH );
+
+   // prelevo informazioni dall'area privata del processo 
+  //io_space_read(natl offset, natb vetti[], natl quanti)
+   if ((r=io_space_read(0,(byte*)&volume, 1))){
+      set_errno(r, "Errore io_space_read %s", path);;
+      mem_free(name_file); 
+      mem_free(path_assoluto);
+      mem_free(pwd); 
+      return -1; 
+   }
+   
+   if ((r=io_space_read(ADDR_PWD, pwd, MAX_PATH))){
+      set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+      mem_free(name_file); 
+      mem_free(path_assoluto);
+      mem_free(pwd); 
+      return -1; 
+   }
+   
+   flog(LOG_DEBUG, "path %s volume %c", pwd, volume ); 
+   
+   //estraggo il nome del file 
+   if(!get_name((char*)path, name_file,MAX_NAME)) { 
+      set_errno(EINVAL, "Nome file non corretto %s", path); 
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return -EINVAL; 
+   } 
+   //estraggo il path assoluto 
+   if(!get_path(path, pwd, path_assoluto)){
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return -EINVAL; 
+  }
+  
+  if(!free_fcb()){
+      set_errno(ENFILE, "Full table"); 
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return -ENFILE; 
+  }
+  
+  
+flog(LOG_DEBUG, "nome %s path %s", name_file, path_assoluto); 
+ 
+  father_fcb=mem_alloc(sizeof(FCB),1); 
+  file_fcb=mem_alloc(sizeof(FCB),1); 
+  memset(father_fcb,0,sizeof(FCB)); 
+  memset(file_fcb,0,sizeof(FCB)); 
+
+  
+  //prelevo il fcb del padre
+  if(!get_fcb_father(volume, path_assoluto, father_fcb)) {
+       set_errno(EINVAL, "Path file non corretto %s", path); 
+       goto errore_open; 
+  }
+  
+//    print_fcb(father_fcb);
+
+  ret=open_entry(name_file, father_fcb, file_fcb); 
+  
+//  print_fcb(father_fcb);
+//  print_fcb(file_fcb); 
+  
+  //gestione del file 
+   
+   //CREATE 
+  
+  
+  flog(LOG_WARN, "Create %d ret %d ", IS_CREAT(mode), ret); 
+  
+  
+  if ( ret && IS_CREAT(mode) ) {
+    set_errno(EEXIST, "File Exist %s", name_file); 
+    goto errore_open; 
+  }
+  
+  if ( !ret && IS_CREAT(mode) && !IS_DIRECTORY(mode)) { 
+     // gestisco creazione del file 
+     flog(LOG_WARN,"creo il file, %s", name_file); 
+     //print_fcb(father_fcb); 
+      if(!create_entry(name_file,ATTR_ARCHIVE, father_fcb, file_fcb)) { 
+  	  perror("Creazione entry"); 
+	  goto errore_open; 
+        }else 
+ 	flog(LOG_DEBUG, "creazione avenuta"); 
+  }
+  
+  //DIRECTORY 
+  
+  if ( ret && IS_DIRECTORY(mode) &&  file_fcb->type != ATTR_DIRECTORY) {
+	set_errno(ENOTDIR, "Is not Directory %s", name_file); 
+	goto errore_open;
+  }
+    
+  if( ret && !IS_DIRECTORY(mode) && file_fcb->type == ATTR_DIRECTORY) {
+	set_errno(EISDIR, "Is  Directory %s", name_file); 
+	goto errore_open;
+  }
+  
+  if (!ret && !IS_CREAT(mode)) { 
+	set_errno(ENOENT,"No such file or directory %s", name_file); 
+	goto errore_open;
+  } 	
+  
+  flog(LOG_WARN, "MODE %x %d %d %d ", mode, IS_READ(mode) , IS_WRITE(mode) ,  IS_RDWR(mode)); 
+  
+//   if ( ret && IS_READ(mode) && ( IS_WRITE(mode) ||  IS_RDWR(mode) )) {
+// 	set_errno(EINVAL, "Bad param"); 
+// 	goto errore_open;
+//   }
+//   
+//   if ( ret && IS_WRITE(mode) && ( IS_READ(mode) ||  IS_RDWR(mode) )) {
+// 	set_errno(EINVAL, "Bad param"); 
+// 	goto errore_open;
+//   }
+//   
+
+  
+  // se sono qui significa che il fcb del file è corretto 
+  file_fcb->mode=mode; 
+
+ // print_fcb(file_fcb);
+  
+  // ora devo inserire queste informazioni nel IO SPACE del processo corrente 
+  fd=insert_fcb(file_fcb);
+  
+  if ( fd < 0) {
+    flog(LOG_WARN,"Errore fd"); 
+    goto errore_open; 
+  } 
+  
+  //0ist_fcb(file_fcb);
+ 
+  
+  
+  mem_free(father_fcb); 
+  mem_free(file_fcb);
+  mem_free(name_file); 
+  mem_free(path_assoluto); 
+  mem_free(pwd);
+  return fd;
+	  
+
+
+errore_open:
+
+  mem_free(father_fcb); 
+  mem_free(file_fcb); 
+  mem_free(name_file); 
+  mem_free(path_assoluto); 
+  mem_free(pwd);
+  return -1;
+
+}
+
+
+//chiude un file 
+
+int c_close(int fd) { 
+  
+  reset_errno(); 
+  return  remove_fcb(fd);
+}
+
+int  c_read(int fd, void *buf, size_t count){
+  
+  FCB * file=NULL; 
+  dword size=sizeof(FCB); 
+  dword offset=SIZE_VOLUME+MAX_PATH;  
+  int r=0,n_read=0; 
+  
+  flog(LOG_WARN,"READ"); 
+  
+  if (  fd<0 || fd>=MAX_FILE  || buf==NULL || count <0) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+
+  if(!(file=mem_alloc(SIZE_FCB,1))){
+    set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+    return -ENOMEM; 
+  } 
+ 
+  
+  memset(file,0,SIZE_FCB); 
+  //leggo il file control block 
+  if ((r=io_space_read(offset+(fd*SIZE_FCB),file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(file); 
+    return -r; 
+  }
+
+ // print_fcb(file); 
+
+   if((n_read=read_fcb(file, buf, count)) < 0 ) { 
+     perror("Read");  
+     mem_free(file); 
+      return -1; 
+   }
+
+  //  print_fcb(file); 
+
+   if ((r=io_space_write(offset+(fd*SIZE_FCB),file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(file); 
+    return -r; 
+  }
+
+
+   mem_free(file); 
+   reset_errno(); 
+   return n_read; 
+} 
+  
+  
+
+
+
+/*funzione che scrive il contenuto di buf su un file */
+
+int  c_write(int fd, const void *buf, size_t count){
+  
+  FCB * file=NULL; 
+  dword size=sizeof(FCB); 
+  dword offset=SIZE_VOLUME+MAX_PATH;  
+  int r=0,n_write=0; 
+  
+  flog(LOG_WARN,"WRITE"); 
+  
+  if (  fd<0 || fd>=MAX_FILE  || buf==NULL || count <0) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+
+  if(!(file=mem_alloc(SIZE_FCB,1))){
+    set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+    return -ENOMEM; 
+  } 
+ 
+  
+  memset(file,0,SIZE_FCB); 
+  //leggo il file control block 
+  if ((r=io_space_read(offset+(fd*SIZE_FCB),file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(file); 
+    return -r; 
+  }
+
+ // print_fcb(file); 
+
+
+   if((n_write=write_fcb(file, buf, count)) < 0 ) { 
+     perror("write"); 
+     mem_free(file); 
+      return -1; 
+   }
+
+  //  print_fcb(file); 
+
+   if ((r=io_space_write(offset+(fd*SIZE_FCB),file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(file); 
+    return -r; 
+  }
+
+
+   mem_free(file); 
+   reset_errno(); 
+   return n_write; 
+} 
+
+
+/*
+ * a nuova posizione è impostata usando il valore specificato da offset, sommato al riferimento dato da whence; quest'ultimo può assumere i seguenti valori7:
+
+SEEK_SET si fa riferimento all'inizio del file: il valore (sempre positivo) di offset indica direttamente la nuova posizione corrente.
+SEEK_CUR si fa riferimento alla posizione corrente del file: ad essa viene sommato offset (che può essere negativo e positivo) per ottenere la nuova posizione corrente.
+SEEK_END si fa riferimento alla fine del file: alle dimensioni del file viene sommato offset (che può essere negativo e positivo) per ottenere la nuova posizione corrente.
+ Dato che la funzione ritorna la nuova posizione, usando il valore zero per offset si può riottenere la posizione corrente nel file chiamando la funzione con lseek(fd, 0, SEEK_CUR).
+*/
+
+int c_lseek(int fd, int new_offset, int whence){
+  
+  FCB * file=NULL; 
+  dword size=sizeof(FCB); 
+  dword offset=SIZE_VOLUME+MAX_PATH;
+  int new_off=0;  
+  int r=0; 
+  
+  flog(LOG_WARN,"LSEEK"); 
+  
+  if (  fd<0 || fd>=MAX_FILE ) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  
+  if(!(file=mem_alloc(SIZE_FCB,1))){
+    set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+    return -ENOMEM; 
+  } 
+ 
+  
+  memset(file,0,SIZE_FCB); 
+  //leggo il file control block 
+  if ((r=io_space_read(offset+(fd*SIZE_FCB),file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(file); 
+    return -r; 
+  }
+  flog(LOG_WARN,"LSEEK %d", new_off); 
+  
+ 
+   if((new_off=lseek_fcb(file, new_offset, whence)) < 0 ) { 
+     perror("LSEEK");  
+     mem_free(file); 
+     return new_off; 
+   }
+  flog(LOG_WARN,"LSEEK %d", new_off); 
+  
+
+   if ((r=io_space_write(offset+(fd*SIZE_FCB),file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(file); 
+    return -r; 
+   }
+
+  flog(LOG_WARN,"LSEEK %d", new_off); 
+    mem_free(file); 
+    reset_errno(); 
+    return new_off; 
+    
+}
+   
+ 
+ 
+int lseek_fcb( FCB * file, int offset, int whence){ 
+
+  
+   
+  if ( file == NULL  || whence <0) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  if ( !file->volume || !file->cluster_father) { 
+    set_errno(EINVAL,"FCb errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+    
+   
+  if (IS_SEEK_SET(whence)) { 
+    
+      //riferimento all'inizio del file 
+      if (offset < 0 ){ 
+	   set_errno(EINVAL,"Offset errato (%s-line%d)", __FILE__, __LINE__); 
+	  return -EINVAL;
+      }
+      // può essere maggiore della grandezza del file 
+      // è in quel caso vien esteso dalla write successiva 
+      file->pos_corr=offset; 
+    
+  }else if ( IS_SEEK_CUR (whence)) {
+      //riferimento alla posizione corrente 
+      file->pos_corr+=offset; 
+  }
+  else if ( IS_SEEK_END(whence)) {
+    //riferimento alla fine 
+   file->pos_corr=file->size; 
+   file->pos_corr+=offset; 
+  }
+    
+  else {   
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+ 
+   return file->pos_corr; 
+  
+}
+
+
+// elimina un file 
+// se qualche processo usa il file , questo viene eliminato lo stesso 
+// sta al programattore evitare che questa sistuazione di veriochi 
+int c_unlink ( const char * path) { 
+ 
+   dword size=sizeof(FCB); 
+  dword offset=SIZE_VOLUME+MAX_PATH;
+  FCB file; 
+  int fd=0, r=0; 
+  
+  if (!path) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  // uso la funziona di apertura , verifica anche che non sia una directory
+  if((fd=c_open(path,O_RDWR)) <= 0 ) 
+     return fd; 
+  
+  // se tutto è andato bene ho carico il fcb corretto in memria sistema 
+       //leggo il file control block 
+  if ((r=io_space_read(offset+(fd*SIZE_FCB),&file, SIZE_FCB))) { 
+    set_errno(r, "Errore io_space_write (%s-line%d)", __FILE__, __LINE__); 
+    return -r; 
+  }
+  
+  if (!delete_entry(&file)) { 
+      perror("Delete Entry "); 
+      return -1; 
+  }
+   
+  if((r=c_close(fd)) <= 0 ) 
+     return r; 
+  
+  return 0; 
+  
+}
+
+/*Funzione che crea una directory*/ 
+int c_mkdir (const char * path) {
+
+   FCB  file_fcb, 	// FCB del file che dobbiamo aprire
+        father_fcb; 	// FCB della cartella madre 
+  
+   byte volume=0; 
+   char *pwd=NULL,		// contiene la direcotory di lavoro 
+	 *path_assoluto=NULL; 	// Path assoluto della direcotruy che contiene il file
+   char *name_file=NULL; 	// nome del file; 
+   dword r=0; 
+   BOOL  ret=FALSE; 
+   int fd=0; 
+   char new_volume=0;
+   
+
+   
+   flog(LOG_INFO, "MKDIR %s", path ); 
+    
+   if (!(name_file=mem_alloc(MAX_NAME,1))) { 
+          set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+	  return -ENOMEM;
+   }
+   memset(name_file, 0, MAX_NAME); 
+   
+   if(!(path_assoluto=mem_alloc(MAX_PATH, 1))) {
+	  set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+	  mem_free(name_file); 
+	  return -ENOMEM;
+   }
+   memset(path_assoluto, 0, MAX_PATH );
+   
+   if(!(pwd=mem_alloc(MAX_PATH, 1))) {
+	set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+	 mem_free(name_file); 
+	 mem_free(path_assoluto); 
+	 return -ENOMEM;
+   }
+   memset(pwd, 0, MAX_PATH );
+
+   memset(&father_fcb, 0, SIZE_FCB );
+   memset(&file_fcb, 0, SIZE_FCB);
+   
+   // prelevo informazioni dall'area privata del processo 
+   
+    // VOLUME 
+     if ((r=io_space_read(ADDR_VOLUME,(byte*)&volume, 1))){
+        set_errno(r, "Errore io_space_read %s", path);
+       goto error_mkdir; 
+     }
+
+     // PWD  
+     if ((r=io_space_read(ADDR_PWD, pwd, MAX_PATH))){
+       set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+       goto error_mkdir; 
+     }
+
+    //estraggo il nome della directory e modifico il path  
+    if(!get_name((char*)path, name_file,MAX_NAME)) { 
+       set_errno(EINVAL, "Nome file non corretto %s", path); 
+       goto error_mkdir; 
+    } 
+    
+   flog(LOG_WARN, "Path %s name %s", path, name_file); 
+   
+   new_volume=volume; 
+   
+   // elaboro il path 
+   
+   if (!get_new_volume(path, &new_volume)) {
+      perror("VOLUME "); 
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      goto error_mkdir; 
+   }
+   
+   //estraggo il path assoluto 
+   if(!create_pathassoluto(path, pwd, path_assoluto)){
+       perror("PATH "); 
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      goto error_mkdir; 
+  }
+
+  flog(LOG_WARN,"VOLUME %c PATH ASSOLUTO : %s",new_volume, path_assoluto); 
+
+  //prelevo il fcb del padre e verifico la consistenza del path 
+  
+  if(!get_fcb_father(new_volume, path_assoluto, &father_fcb)) {
+	perror("PADRE"); 
+       set_errno(EINVAL, "Path file non corretto %s", path); 
+       goto error_mkdir; 
+  }
+  
+  
+   print_fcb(&father_fcb); 
+
+  // vwerifico che non esista un nome questo 
+  ret=open_entry(name_file, &father_fcb, &file_fcb); 
+
+  //gestione errori
+  
+  //CREAZIONE DELL?ENTRY 
+  
+  if ( ret ) {
+    set_errno(EEXIST, "DIR Exist %s", name_file); 
+    goto error_mkdir; 
+  } else { 
+     // gestisco creazione del file 
+     flog(LOG_WARN,"creo la directory, %s", name_file);
+     
+      if(!create_entry(name_file,ATTR_DIRECTORY, &father_fcb, &file_fcb)) { 
+  	  perror("Creazione entry"); 
+	  goto error_mkdir; 
+        }else 
+      flog(LOG_DEBUG, "creazione avenuta"); 
+ 		
+  }
+  
+  
+  
+  //CREAZIONE DOT DOTDOT 
+  flog(LOG_DEBUG, "Format");
+  
+   if (!format_directory(&file_fcb)) {
+     perror("FORMAT ENTRY"); 
+     goto error_mkdir; 
+   }
+   
+  flog(LOG_DEBUG, "MKDIR terminata rmd	"); 
+
+  print_fcb(&file_fcb);
+    
+  mem_free(name_file); 
+  mem_free(path_assoluto); 
+  mem_free(pwd);
+  return 0; 
+  
+error_mkdir:
+  mem_free(name_file); 
+  mem_free(path_assoluto); 
+  mem_free(pwd);
+  return -1; 
+}
+
+
+
+
+BOOL create_pathassoluto(const char *path, const char * pwd, char *path_assoluto) {
+
+   char * double_dot=NULL; 
+   char path_temp[MAX_PATH];  
+   char * token=NULL; 
+  
+   if ( !path  || !pwd || !path_assoluto) {
+     set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+     return FALSE;
+   } 
+ 
+    memset(path_temp,0, MAX_PATH); 
+    memset(path_assoluto,0, MAX_PATH); 
+
+   
+    
+    
+    if ((double_dot=strchr(path, ':'))) {  // se è zero non è stato specificato nessun volume 
+	
+	 flog(LOG_DEBUG,"PATH %s", double_dot); 
+
+	if(*(double_dot+1) != '/' || double_dot==path) {
+	  set_errno(EINVAL,"Path errato (%s-line%d)", __FILE__, __LINE__); 
+	  return FALSE;
+	}
+	
+	strncpy(path_temp, (double_dot+1), MAX_PATH); 
+    }else if ( *path== '/')  { 
+	strncpy(path_temp, path, MAX_PATH); 
+    } else 
+    { 
+	strncpy(path_temp, pwd, MAX_PATH);
+	strncat(path_temp, path, MAX_PATH-strlen(path_temp)); 
+    }
+    
+    
+    flog(LOG_WARN,"OLD PATH %s", path_temp);
+    
+    // ora creaiamo il path assoluto 
+    
+    token=strtok(path_temp, "/"); 
+    
+    while(TRUE) {
+    
+      if (!token) { 				// FINE
+	   strcat(path_assoluto, "/"); 
+	   break; 
+      }	
+      else if(!strncmp(token, ".", 2)) {		// DOT 
+	  token=strtok(NULL, "/"); 
+	  continue; 
+      }
+      else if(!strncmp(token, "..", 3)) { 	// DOT DOT 
+	  // devo eliminare il token precedente 
+	  // devo fare in modo che alla prossima scrittura si sovrascriva 
+	  char *chr=NULL; 
+	  int size=0; 
+	  
+	  chr=strrchr(path_assoluto, '/');
+	  flog(LOG_DEBUG, "CHR %s", chr); 
+	  size=strlen(chr); 
+	  memset(chr, 0, size);		//elimino  token  
+	  token=strtok(NULL, "/"); 
+      }
+      else { 
+	  strncat(path_assoluto, "/",MAX_PATH-strlen(path_assoluto)); 
+	  strncat(path_assoluto, token, MAX_PATH-strlen(path_assoluto));   
+	  token=strtok(NULL, "/"); 
+      }
+	
+    }// while 
+    
+    flog(LOG_WARN, "NUOVO PATH %s", path_assoluto); 
+    
+
+    return TRUE; 
+}
+
+
+/*Funzione che convalida il path, verificando la presenza del file e che siano directory */ 
+
+BOOL validate_path(byte volume, const char * path_assoluto) {
+ 
+  char * my_path=NULL,*token=NULL; 
+  FCB padre,figlio; 
+  TABELLA_VOLUMI *vol=NULL; 
+  
+  if(!(my_path=mem_alloc(MAX_PATH,1))) {
+      set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+      return FALSE; 
+    }
+   
+   memset((void*)my_path, 0, MAX_PATH );
+   memset(&padre, 0, sizeof(FCB)); 
+   memset(&figlio,0, sizeof(FCB)); 
+   strncpy(my_path, path_assoluto, MAX_PATH); 
+   
+  if(!(vol=get_volume(volume))) { 
+    set_errno(EINVAL,"Errore volume (%s-line%d)", __FILE__, __LINE__); 
+    mem_free(my_path); 
+    return FALSE; 
+   }
+   
+   memcpy((void*)&padre, &vol->fcb_root, SIZE_FCB); 
+   memcpy((void*)&figlio, &vol->fcb_root, SIZE_FCB); 
+   
+   token=strtok(my_path, "/"); 
+   
+   while(token) {
+      flog(LOG_INFO, "tok : %s", token); 
+      
+      if((!open_entry(token,&padre,&figlio))) {	// prima fa la fuznione  
+	set_errno(EINVAL,"Errore path (%s-line%d)", __FILE__, __LINE__); 
+	 mem_free(my_path); 
+	 return FALSE; 
+      }
+      
+    
+      if(figlio.type!=ATTR_DIRECTORY) {	// prima fa la fuznione  
+	 set_errno(EINVAL,"Errore path (%s-line%d)", __FILE__, __LINE__); 
+	 mem_free(my_path); 
+	 return FALSE; 
+      }
+      
+      flog(LOG_DEBUG, "Name %s", figlio.name); 
+      memcpy(&padre, &figlio, SIZE_FCB); 
+      
+      token=strtok(NULL, "/"); 
+     
+   }
+   
+   
+   mem_free(my_path); 
+   return TRUE; 
+   
+}  
+
+
+
+int c_rmdir (const char *pathname) {}
+
+
+
+
+// SYSTEM CALL CHWE EFFETTUA IL CAMBIO DELLA DIRECTORY DI LAVORO 
+// il path deve essere scpèecificato nella seguente forma 
+// [c]:/directroy/file 
+
+int c_chdir (const char * path) {
+  
+  
+   FCB * file_fcb=NULL, 	// FCB del file che dobbiamo aprire
+       * father_fcb=NULL; 	// FCB della cartella madre 
+  
+   byte volume=0; 
+   char *pwd=NULL,		// contiene la direcotory di lavoro 
+	 *path_assoluto=NULL; 	// Path assoluto della direcotruy che contiene il file
+   char *name_file=NULL; 	// nome del file; 
+   dword r=0; 
+   BOOL  ret=FALSE; 
+   int fd=0; 
+   char new_volume=0; 
+ 
+   
+   flog(LOG_INFO, "CHDIR path %s", path ); 
+   
+   if (!(name_file=mem_alloc(MAX_NAME,1))) { 
+          set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+	  return -ENOMEM;
+   }
+   memset(name_file, 0, MAX_NAME); 
+   
+   if(!(path_assoluto=mem_alloc(MAX_PATH, 1))) {
+	  set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+	  mem_free(name_file); 
+	  return -ENOMEM;
+   }
+   memset(path_assoluto, 0, MAX_PATH );
+   
+   if(!(pwd=mem_alloc(MAX_PATH, 1))) {
+	set_errno(ENOMEM,"Errore memoria (%s-line%d)", __FILE__, __LINE__); 
+	 mem_free(name_file); 
+	 mem_free(path_assoluto); 
+	 return -ENOMEM;
+   }
+   memset(pwd, 0, MAX_PATH );
+
+   // prelevo informazioni dall'area privata del processo 
+   
+   // VOLUME 
+    if ((r=io_space_read(ADDR_VOLUME,(byte*)&volume, 1))){
+       set_errno(r, "Errore io_space_read %s", path);
+      goto error_chdir; 
+    }
+    // PWD  
+    if ((r=io_space_read(ADDR_PWD, pwd, MAX_PATH))){
+      set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+      goto error_chdir; 
+    }
+    
+   flog(LOG_DEBUG, "Path %s Volume %c", pwd, volume ); 
+   
+   // estraggo il volume dal path 
+   
+   
+   new_volume=volume; 
+   if (!get_new_volume(path, &new_volume)) {
+      perror("VOLUME "); 
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      goto error_chdir; 
+   }
+   
+   //estraggo il path assoluto 
+   if(!create_pathassoluto(path, pwd, path_assoluto)){
+       perror("PATH "); 
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      goto error_chdir; 
+  }
+  
+  // convalido il path  
+   if (!validate_path(new_volume, path_assoluto)) { 
+     perror("PATH "); 
+       set_errno(EINVAL, "Path file non corretto %s", path); 
+       goto error_chdir; 
+   }
+  
+  flog(LOG_WARN,"VOLUME %c PATH ASSOLUTO : %s",new_volume, path_assoluto); 
+
+  //inserisco il nuovo path in memoria 
+        
+  if ((r=io_space_write(ADDR_PWD, path_assoluto, MAX_PATH))){
+      set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+       goto error_chdir;
+   }
+ 
+          
+  if ((r=io_space_write(ADDR_VOLUME, &volume, 1))){
+      set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+       goto error_chdir;
+   }
+ 
+  
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return 0; 
+ 
+  
+error_chdir: 
+    mem_free(name_file); 
+    mem_free(path_assoluto); 
+    mem_free(pwd);
+    return -1; 
+} 
+
+
+// system call che riporta la directory corrente 
+
+
+char *c_getcwd(char *buf, size_t size) {
+
+ char volume[2]; 
+ char path[MAX_PATH]; 
+ int r=0; 
+  
+  if ( buf==NULL || size <0) {
+    set_errno(EINVAL,"Parametro errato (%s-line%d)", __FILE__, __LINE__); 
+    return -EINVAL;
+  }
+  
+  memset(path,0,MAX_PATH); 
+  memset(volume,0,2); 
+   // prelevo informazioni dall'area privata del processo 
+  // volume
+   if ((r=io_space_read(0,(byte*)volume, 1))){
+      set_errno(r, "Errore io_space_read %s", path);;
+      return -1; 
+   }
+   // directory corrente 
+   if ((r=io_space_read(ADDR_PWD, path, MAX_PATH))){
+      set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+      return -1; 
+   }
+   
+  memset(buf,0,size); 
+  strncat(buf, volume, size); 
+  strncat(buf, ":", size-strlen(buf));
+  strncat(buf, path, size-strlen(buf));
+  
+  return buf; 
+}
+
+
+
+
+
+
+
+  
+  
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+int  test_system_call()
+{
+
+   FCB * file_fcb=NULL, 	// FCB del file che dobbiamo aprire
+       * father_fcb=NULL; 	// FCB della cartella madre 
+  
+   byte volume=0; 
+   char *pwd=NULL,		// contiene la direcotory di lavoro 
+	 *path_assoluto=NULL; 	// Path assoluto della direcotruy che contiene il file
+   char *name_file=NULL; 	// nome del file; 
+   dword r=0; 
+   BOOL  ret=FALSE; 
+   int fd=0; 
+   
+   char * path="/"; 
+   
+   flog(LOG_INFO, "path %s", path ); 
+   
+   name_file=mem_alloc(MAX_NAME,1);  
+   memset(name_file, 0, MAX_NAME); 
+   path_assoluto=mem_alloc(MAX_PATH, 1);
+   memset(path_assoluto, 0, MAX_PATH );
+   pwd=mem_alloc(MAX_PATH, 1);
+   memset(pwd, 0, MAX_PATH );
+
+   // prelevo informazioni dall'area privata del processo 
+//   // volume
+//    if ((r=io_space_read(0,(byte*)&volume, 1))){
+//       set_errno(r, "Errore io_space_read %s", path);;
+//       mem_free(name_file); 
+//       mem_free(path_assoluto);
+//       mem_free(pwd); 
+//       return -1; 
+//    }
+//    // directory corrente 
+//    if ((r=io_space_read(ADDR_PWD, pwd, MAX_PATH))){
+//       set_errno(r, "Errore io_space_read (%s-line%d)", __FILE__, __LINE__);
+//       mem_free(name_file); 
+//       mem_free(path_assoluto);
+//       mem_free(pwd); 
+//       return -1; 
+//    }
+//    
+   flog(LOG_DEBUG, "path %s volume %c", pwd, volume ); 
+   
+   //estraggo il nome della directory 
+   if(!get_name(path, name_file, MAX_NAME)) { 
+      set_errno(EINVAL, "Nome file non corretto %s", path); 
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return -EINVAL; 
+   } 
+   
+   //estraggo il path assoluto 
+   if(!get_path(path, pwd, path_assoluto)){
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return -EINVAL; 
+  }
+  
+  flog(LOG_WARN,"PATH ASSOLUTO : %s", path_assoluto); 
+  
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+}
+
+
+/*
+ * 
+   //estraggo il path assoluto 
+   if(!get_path(path, pwd, path_assoluto)){
+      set_errno(EINVAL, "Path file non corretto %s", path); 
+      mem_free(name_file); 
+      mem_free(path_assoluto); 
+      mem_free(pwd);
+      return -EINVAL; 
+  }
+  
+  
+flog(LOG_DEBUG, "nome %s path %s", name_file, path_assoluto); 
+ 
+  father_fcb=mem_alloc(sizeof(FCB),1); 
+  file_fcb=mem_alloc(sizeof(FCB),1); 
+  memset(father_fcb,0,sizeof(FCB)); 
+  memset(file_fcb,0,sizeof(FCB)); 
+
+  
+  //prelevo il fcb del padre
+  if(!get_fcb_father(volume, path_assoluto, father_fcb)) {
+       set_errno(EINVAL, "Path file non corretto %s", path); 
+//       goto errore_open; 
+  }
+  
+    print_fcb(father_fcb);
+
+  ret=open_entry(name_file, father_fcb, file_fcb); 
+  
+  
+  
+  
+  if ( ret ) {
+    set_errno(EEXIST, "DIR Exist %s", name_file); 
+//    goto errore_mkdir; 
+  }else { 
+     // gestisco creazione del file 
+     flog(LOG_WARN,"creo la directory, %s", name_file);
+      if(!create_entry(name_file,ATTR_DIRECTORY, father_fcb, file_fcb)) { 
+  	  perror("Creazione entry"); 
+//	  goto errore_open; 
+        }else 
+ 	flog(LOG_DEBUG, "creazione avenuta"); 
+  }
+  
+  //ora devo creare i do dot 
+  // creare il nuovo cluster per la directory 
+  /*create_fat
+  
+  creare dot dot dot 
+  */
+  

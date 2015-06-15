@@ -1,0 +1,221 @@
+/*
+ * lspci
+ */
+
+#include <sys.h>
+#include <lib.h>
+
+process lspci body lspci_body(5), 20, LIV_UTENTE;
+
+const natb PCI_MAXBUS = 255;
+
+natw pci_loc(natb bus, natb dev, natb fun)
+{
+	return (bus << 8L) | (dev << 3L) | fun;
+}
+
+natb pci_get_bus(natw l)
+{
+	return (l >> 8) & 0xFF;
+}
+
+natb pci_get_dev(natw l)
+{
+	return (l >> 3) & 0x1F;
+}
+
+natb pci_get_fun(natw l)
+{
+	return l & 0x7;
+}
+
+
+const char* pci_class_codes[] = {
+	"pre revision 2.0",
+	"mass storage controller",
+	"network controller",
+	"display controller",
+	"multimedia device",
+	"memory controller",
+	"bridge device",
+	"simple communication controller",
+	"base system peripheral",
+	"input device",
+	"docking station",
+	"processor",
+	"serial bus controller",
+	};
+
+struct pci_class_codes_t {
+	natw code;
+	const char *des;
+};
+
+pci_class_codes_t pci_subclass_codes[][20] = {
+	{ // class 0x00
+		0x0000, "Non VGA",
+		0x0101, "VGA compatible",
+		0xFFFF, 0
+	},
+	{ // class 0x01
+		0x0000, "SCSI",
+		0x0100, "IDE", // caso speciale
+		0x0200, "Floppy disk",
+		0x0300, "IPI",
+		0x0400, "RAID",
+		0x8000, "other",
+		0xFFFF, 0
+	},
+	{ // class 0x02
+		0x0000, "Ethernet",
+		0x0100, "Token ring",
+		0x0200, "FDDI",
+		0x0300, "ATM",
+		0x8000, "other",
+		0xFFFF, 0
+	},
+	{ // class 0x03
+		0x0000, "VGA-compatible",
+		0x0001, "8541-compatible",
+		0x0100, "XGA",
+		0x8000, "other",
+		0xFFFF, 0
+	},
+	{ // class 0x04
+		0x0000, "Video",
+		0x0100, "Audio",
+		0x8000, "other",
+		0xFFFF, 0
+	},
+	{ // class 0x05
+		0x0000, "RAM",
+		0x0100, "Flash memory",
+		0x8000, "other",
+		0xFFFF, 0
+	},
+	{ // class 0x06
+		0x0000, "Host/PCI",
+		0x0100, "PCI/ISA",
+		0x0200, "PCI/EISA",
+		0x0300, "PCI/Micro Channel",
+		0x0400, "PCI/PCI",
+		0x0500, "PCI/PCMCIA",
+		0x0600, "PCI/NuBus",
+		0x0700, "PCI/CardBus",
+		0x8000, "other",
+		0xFFFF, 0
+	},
+	{ // class 0x07
+		0x0000, "Generic XT-compatible serial controller",
+		0x0001, "16450-compatible serial controller",
+		0x0002, "16550-compatible serial controller",
+		0x0100, "Parallel port",
+		0x0101, "Bi-directional paraller port",
+		0x0102, "CP 1.X-compliant parallel port",
+		0x8000, "other",
+		0xFFFF, 0
+	},
+	{ // class 0x08
+		0x0000, "Generic 8259 PIC",
+		0x0001, "ISA PIC",
+		0x0002, "EISA PIC",
+		0x0100, "Generic 8237 DMA controller",
+		0x0101, "ISA DMA controller",
+		0x0102, "EISA DMA controller",
+		0x0200, "Generic 8254 timer",
+		0x0201, "ISA system timers",
+		0x0202, "EISA system timers",
+		0x0300, "Generic RTC controller",
+		0x0301, "ISA RTC controller",
+		0x8000, "other",
+		0xFFFF, 0
+	},
+	{ // class 0x09
+		0x0000, "Keyboard controller",
+		0x0100, "Digitizer",
+		0x0200, "Mouse controller",
+		0x8000, "other",
+		0xFFFF, 0
+	},
+	{ // class 0x0A
+		0x0000, "Generic",
+		0x8000, "other",
+		0xFFFF, 0
+	},
+	{ // class 0x0B
+		0x0000, "386",
+		0x0100, "486",
+		0x0200, "Pentium",
+		0x1000, "Alpha",
+		0x2000, "PowerPC",
+		0x4000, "Co-processor",
+		0xFFFF, 0
+	},
+	{ // class 0x0C
+		0x0000, "Firewire",
+		0x0100, "ACCESS.bus",
+		0x0200, "SSA",
+		0x0300, "USB",
+		0x0400, "Fibre Channel",
+		0xFFFF, 0
+	}
+};
+
+const char* pci_decode_class(natb code)
+{
+	if (code == 0xFF)
+		return "other";
+	if (code < sizeof(pci_class_codes) / sizeof(const char*))
+		return pci_class_codes[code];
+	return "unknown";
+}
+
+const char* pci_decode_subclass(natb code, natb subcode, natb prog_if)
+{
+	if (code == 0x01 && subcode == 0x01)
+		return "IDE";
+	natw c = subcode << 8L | prog_if;
+	pci_class_codes_t *pcc = pci_subclass_codes[code];
+	while (pcc->code != 0xFFFF) {
+		if (pcc->code == c)
+			return pcc->des;
+		pcc++;
+	}
+	return "unkwnown";
+}
+
+process_body lspci_body(int a)
+{
+	for (natb bus = 0; bus < PCI_MAXBUS; bus++) {
+		for (natb dev = 0; dev < 32; dev++) {
+			for (natb fun = 0; fun < 8; fun++) {
+				natw vendorID, deviceID;
+				natb res, htype, ipin, irq, code;
+				natb subcode, prog_if;
+				natw l = pci_loc(bus, dev, fun);
+
+				vendorID = pci_read(l, 0, sizeof(vendorID));
+
+				if (vendorID == 0xFFFF)
+					continue;
+
+				deviceID = pci_read(l, 2, sizeof(deviceID));
+				htype    = pci_read(l, 3 * 4 + 2, sizeof(htype));
+				code     = pci_read(l, 2 * 4 + 3, sizeof(code));
+				subcode  = pci_read(l, 2 * 4 + 2, sizeof(subcode));
+				prog_if  = pci_read(l, 2 * 4 + 1, sizeof(prog_if));
+				printf(a, "%2x.%2x.%2x: %4x %4x", pci_get_bus(l), pci_get_dev(l), pci_get_fun(l), vendorID, deviceID);
+				if ((htype & 0x7F) == 0) {
+					ipin = pci_read(l, 15 * 4 + 1, sizeof(ipin));
+					if (ipin != 0) {
+						irq = pci_read(l, 15 * 4, sizeof(irq));
+						printf(a, " INT%c# -> IRQ%d", 'A' + ipin - 1, irq);
+					} else
+						printf(a, " (no INT)");
+				} 
+				printf(a, "\n\t%s (%s)\n", pci_decode_class(code), pci_decode_subclass(code, subcode, prog_if));
+			}
+		}
+	}
+}
+

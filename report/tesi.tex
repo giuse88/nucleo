@@ -1,0 +1,54 @@
+\documentclass[a4paper,11pt]{report} % A4, 11 punti, fronte-retro, libro
+\usepackage[italian]{babel} % Adatta LaTeX alle convenzioni tipografiche italiane
+\usepackage[utf8]{inputenc} % Consente l'uso caratteri accentati italiani
+\usepackage{graphicx} % Per le immagini  
+\usepackage {fancyhdr} % Per l' ambiente abstract
+\pagestyle{fancy}
+\renewcommand{\chaptermark}[1]{% 
+\markboth{\thechapter.\ #1}{}} 
+\renewcommand{\sectionmark}[1]{}
+\usepackage{indentfirst} % Indentazione all' inizio dei capitoli
+\usepackage{listings}
+\usepackage[usenames]{color}
+\usepackage{multirow}
+\usepackage{multicol} 
+
+\textsc{}\lstnewenvironment{code}[1][]
+{\lstset{basicstyle=\small\ttfamily %, columns=fullflexible,
+keywordstyle=\bfseries, commentstyle=\color{blue},
+language=C,   basicstyle=\small,}}{}
+%\lstloadlanguages{C}
+\usepackage{url} % Formattazione URLl
+\newenvironment{mylisting} % Supporto al codice sorgente
+	{\begin{list}{}{\setlength{\leftmargin}{1em}}\item\scriptsize\bfseriesf} %
+	{\end{list}}%
+\newenvironment{mytinylisting} %
+	{\begin{list}{}{\setlength{\leftmargin}{1em}}\item\tiny\bfseries} %
+	{\end{list}} %
+\newcommand{\fncyblank}{\fancyhf{}} % 
+%\newenvironment{abstract} %
+\frenchspacing % Non aumentare la spaziatura tra periodi
+
+\begin{document}
+%	\frontmatter
+		\input{Fronte.tex}
+		\input{indice.tex}
+		
+	%\mainmatter
+		\input{Intro.tex}
+		\input{Introduzione_problema.tex}
+		\input{Fat.tex}
+		\input{Requisiti.tex}
+		\input{Modifiche.tex}
+		\input{Struttura_Progetto.tex}
+		%\lstinputlisting{fat.c}
+		%\input{stato_arte.tex}
+		%\input{progetto.tex}
+%	\backmatter
+	%	\appendix
+	%		\input{appendiceA.tex}
+		%\appendix
+		%	\input{appendiceB.tex}
+		\input{bibliografia.tex}
+		\input{Glossario.tex}
+\end{document}

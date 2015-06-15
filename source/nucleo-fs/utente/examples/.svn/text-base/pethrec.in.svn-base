@@ -1,0 +1,83 @@
+#include <sys.h>
+#include <lib.h>
+
+/*
+*
+* Programma receive 
+* Ricezione di un frame ethernet
+*
+*/
+
+#define BUF_SIZE 200
+
+//buffer nel quale si immagazzina inizialmente il pacchetto
+natb buf[BUF_SIZE];
+ETH_ERR status;
+
+process proc_eth_receive body p_eth_rec(2), 200, LIV_UTENTE;
+
+process_body p_eth_rec(int a) {
+	printf(a, "Processo di prova ricezione\n");
+	
+	printf(a, "Ricezione in corso...\n");
+	
+	eth_receive(0, buf, BUF_SIZE, status);
+	
+	/* 
+		+----+------+------+---+-----------------+-----+----- - - -
+		|HEAD|  DA  |  SA  |LEN|     PAYLOAD     | CRC |
+		+----+------+------+---+-----------------+-----+----- - - -
+	*/
+	
+	natw* x;
+	natw plen, tlen;
+	natb* frame;
+	
+	switch (status) {
+		case RX_OK:
+			//legge la lunghezza del payload (campo LEN)
+			x = (natw*) &buf[16];
+			plen = *x;
+			printf(a, "La lunghezza del payload e` %d.\n", plen);
+		
+			/*
+				+------+------+---+-----------------+
+				|  DA  |  SA  |LEN|     PAYLOAD     |
+				+------+------+---+-----------------+ 
+			*/
+		
+			//il frame è lungo plen + 6 bytes (DA) + 6 (SA) + 2 (LEN)
+			tlen = plen + 14;
+			frame = (natb*) mem_alloc(tlen);
+			memcpy(frame, buf+4, tlen);
+		
+			printf(a, "\n|");
+			for (int i = 0; i < tlen; i++)
+				printf(a, "0x%2x|", (char) frame[i]);
+		
+			printf(a, "\n\nRicezione completata con successo.\n");
+		
+			// ... qui si puo' usare il frame.
+			mem_free(frame);
+		break;
+		
+		case RX_ERROR:
+			printf(a, "Si e` verificato un errore nella ricezione.\n");
+		break;
+		
+		case RX_STATUS_ERROR_OR_WRONG_LEN:
+			printf(a, "Header o dimensioni del frame non validi.\n");
+		break;
+		
+		case RX_NOT_ENOUGH_SPACE:
+			printf(a, "Il buffer di ricezione non è dimensionato correttamente.\n");
+		break;
+		
+		case SYSTEM_ERROR:
+			printf(a, "Errore interno della scheda.\n");
+		break;
+		
+		default:
+		printf(a, "Impossibile completare la ricezione.\n");
+	}	
+}

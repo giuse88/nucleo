@@ -1,0 +1,50 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Fronte
+
+% vspace serve ad aggiungere extra spazio verticale
+% em sta ad indicare la grandezza della lettera M maiuscola
+
+% Large indica una dimensione del font di 14.4 pt
+% large indica una dimensione del font di 12 pt
+% normalsize indica una dimensione del font di 10 pt
+
+% vfill inserisce sufficiente spazio binaco verticalmente per fare in modo che il
+% sopra e il sotto del testo siano allieneati col margine superiore e inferiore
+
+\begin{titlepage}
+ \begin{center}
+     \includegraphics[width=7cm]{Immagini/unipi.jpg}\\
+     \vspace{1em}
+     {\Large \textsc{Università degli studi di Pisa}}\\
+     \vspace{1em}
+     {\Large \textsc{Facoltà di Ingegneria}}\\
+     \vspace{2em}
+     {\normalsize Corso di laurea in}\\
+     \vspace{1em}
+     {\Large \textsc{Ingegneria Informatica}}\\
+     \vspace{2em}
+     {\LARGE \textbf{Realizzazione del supporto }}\\
+     \vspace{1em}
+     {\LARGE \textbf {per il file system in un nucleo}}\\
+     \vspace{1em}
+     {\LARGE \textbf {multiprogrammato}}\\
+     \vspace{1em}
+ \end{center}
+
+
+\vskip 2cm
+  \begin{center}
+    \begin{tabular}{c c c c c c c c}
+      RELATORI  & & & & & & & CANDIDATO \\
+      \large{Prof. Giuseppe Lettieri}   & & & & & & & \large{Giuseppe Pes}\\
+      \large{Prof. Enzo Mingozzi} 
+    \end{tabular}
+  \end{center}
+
+\vskip 1cm
+\begin{center}
+{\normalsize Anno Accademico 20010/2011}
+\end{center}
+\end{titlepage}
+\clearpage{\pagestyle{empty}\cleardoublepage}
+%\clearpage{\pagestyle{empty}\cleardoublepage}

@@ -1,0 +1,16 @@
+
+.PHONY:clear all
+
+all : string.o errno.o stdarg.o wchar.o 
+
+errno.o: errno.c stdarg.o  
+	gcc -c  $(CFLAGS) $(INCLUDE) errno.c  -o errno.o
+stdarg.o : stdarg.c  string.o 
+	gcc -c  $(CFLAGS) $(INCLUDE) stdarg.c -o stdarg.o 
+wchar.o: wchar.c string.o 
+	gcc -c  $(CFLAGS) $(INCLUDE) wchar.c  -o wchar.o 
+string.o :string.c
+	gcc -c  $(CFLAGS) $(INCLUDE) string.c -o string.o 
+
+clear : 
+	-rm *.o 	

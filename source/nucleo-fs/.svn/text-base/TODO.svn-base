@@ -1,0 +1,21 @@
+// completato
+* PCI
+* hard disk con DMA
+* I/O Apic
+* importazione del driver video
+* memoria dinamica per il modulo I/O
+* ricerca centralizzata dei dispositivi PCI
+* driver rete RTL8139
+* interrupt condivisi
+* allocazione di memoria contigua
+* driver audio ES1370
+* driver UHCI
+
+// altro
+- altri timer (local APIC, ...)
+- debugging dei programmi utente (gdb stub)
+- USB
+- ACPI
+- altri driver
+- panic in modalita' grafica?
+- cut/copy/paste nei terminali virtuali?

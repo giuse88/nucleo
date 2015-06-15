@@ -1,0 +1,1386 @@
+
+#include <fat.h> 
+#include <type.h> 
+#include <volumi.h>
+#include <sistema.h>
+
+extern TABELLA_VOLUMI * tabella; 
+dword_ptr  load_fat_memmory(TABELLA_VOLUMI*);
+void insert_part_name ( const word * name, char * buf, int );
+FCB *  add_short_dir (  SHORT_ENTRY_FAT  ** dir);
+FCB *  add_long_dir (  LONG_ENTRY_FAT  ** dir);
+void print_fcb( const FCB*); 
+dword free_dir_entry (dword_ptr); 
+
+/* Funzione che riporta il tipo di file system 
+   Seguendo le specifiche MICROSOFT 
+ */ 
+
+byte getFileSystemType ( dword DataSizeCluster ) { 
+  
+  if ( DataSizeCluster < 4085) 
+    return FAT12; 
+  else if ( DataSizeCluster < 65525)
+    return FAT16; 
+  else 
+    return FAT32; 
+} 
+
+
+/* Verifichiamo se è presente il MAGIC Number nel Settore */ 
+BOOL check_boot_sector ( MBR * mbr ) { 
+    
+  if (mbr->magic_number[0] == 0x55 && mbr->magic_number[1]==0xAA)
+    return TRUE; 
+  else 
+    return FALSE; 
+}
+
+
+/* FUNzione che Carica in memoria tutte le fat dei vari volumi
+ */ 
+
+BOOL init_fat() { 
+
+  TABELLA_VOLUMI * temp=tabella; 
+  dword_ptr  fat_tmp=NULL;
+
+   while(temp) { 
+
+    	fat_tmp=(dword_ptr)load_fat_memmory(temp); 
+    
+    if(fat_tmp==NULL) 
+    	  return FALSE;  // verifica se devo deallocare qualcosa 
+  
+    // inizializzo la directory di root facendola puntare al cluster in memoria 
+ 	 temp->root= ( int *)fat_tmp + ( temp->fat_info.first_cluster_directory ); 
+     temp->fat=fat_tmp;   
+     temp=temp->next; 
+  
+	 }
+
+  return TRUE;
+
+} 
+
+
+
+// carica la fat in memoria 
+
+dword_ptr  load_fat_memmory( TABELLA_VOLUMI * entry) { 
+
+  lword size_fat_byte=entry->fat_info.size_fat*SECT_SIZE; 
+  dword size_fat_set=entry->fat_info.size_fat;
+  int cicli=0, r=0;  
+  char *  fat =NULL, *fat_tmp=NULL; 
+ int i=0; 
+
+  flog ( LOG_INFO, "Inizio caricamento FAT "); 
+  flog ( LOG_INFO, "SIZE %d", size_fat_byte); 
+  
+  fat=(char *)mem_alloc(size_fat_byte, 2); 
+
+   if ( fat == NULL) 
+   flog(LOG_WARN, "Errore Allocazione FAT"); 
+
+   flog(LOG_WARN, "Devo caricare %d", entry->fat_info.size_fat); 
+   flog(LOG_WARN, "cicli %d",  cicli=size_fat_set /32); 
+   flog(LOG_WARN, "Rimanenza %d", size_fat_set%32); 
+   fat_tmp=fat; 
+
+   for(i=0; i <cicli; i++,   ((char *)fat_tmp +32*512))
+    read_part_n  (entry-> ata, entry-> disco, entry->indice_partizione, entry->fat_info.first_set_fat, 32, (void *)fat_tmp);
+
+   if ( r != 0) 
+     read_part_n  (entry-> ata, entry-> disco, entry->indice_partizione, entry->fat_info.first_set_fat, r, (void *)fat_tmp);
+
+   flog ( LOG_INFO, "Fine caricamento FAT "); 
+
+   return (dword_ptr) fat; 
+
+}
+
+
+// funzione che mi rende il prossimo puntatore faccendo gli oportuni controlli 
+
+// funzione che serve per scorrere la lista dei chain 
+
+dword getNext( dword_ptr fat , dword cluster) {
+  
+  dword_ptr ptr = fat + cluster ; 
+  dword entry; 
+  FCB  *  fcb=NULL; 
+
+  if ( fat == NULL || cluster < 2 ) 
+    return NULL; 
+  
+  entry= * ((dword_ptr)(ptr)) & MASK_32 ; 
+
+  if ( entry != EOC_32)
+    return entry; 
+  else 
+    return 0; 
+
+}
+
+// Funzione che dato l'indirizzo di un cluster appartenente ad una directory riporta la lista 
+// dei fcb contenuti in essa 
+
+void   get_dir_entry( byte volume,  dword  first_cluster) { 
+
+  // prelevare il cluster ( tabella volumi) 
+  TABELLA_VOLUMI * tab=get_volume(volume); 
+  dword  size_cluster = (tab->fat_info.sectors_for_cluster)*(tab->fat_info.byts_for_sector); 
+  void * cluster = (void*) mem_alloc(size_cluster,1); 
+  SHORT_ENTRY_FAT * entry=NULL; 
+  dword first_sector=0;
+  FCB * tmp=NULL; 
+  int i=0; 
+
+
+  if ( first_cluster < 2) 
+    flog(LOG_WARN, "ERRORE"); 
+  if ( !tab) 
+    flog(LOG_WARN," ERRORE"); 
+
+
+  flog(LOG_WARN, " INserisco in memmoria %d %c", size_cluster, tab->label); 
+
+  // prima di leggere devo trasformare il cluster in primo settore 
+  first_sector=FirstDataSectorOfCluster(first_cluster,
+                                                                          tab->fat_info.sectors_for_cluster,
+					                                  tab->fat_info.first_set_data); 
+
+  //  flog(LOG_WARN, "Settore %d", tab->fat_info.first_set_data);
+  //flog(LOG_WARN , "Cluster Root : %d", tab->fat_info.first_cluster_directory);  
+
+  read_part_n(tab->ata, tab->disco, tab->indice_partizione, first_sector,
+	                tab->fat_info.sectors_for_cluster, (void*)cluster); 
+
+
+  /***********************************************************************************************/
+
+  entry = ((SHORT_ENTRY_FAT*)cluster);
+
+  flog(LOG_WARN, "Grandezza short %d, long %d", sizeof(SHORT_ENTRY_FAT), sizeof(LONG_ENTRY_FAT)); 
+
+  i=0; 
+
+ while ( TRUE) {
+
+   // LEBERA
+    if(entry->DIR_Name[0]==ALL_FREE)
+      break; 
+
+    if (entry->DIR_Name[0]==FREE ) { 
+      entry++; 
+    continue; 
+    } 
+  
+    // verifichiamo che tipo di entrata è
+    //    flog(LOG_WARN, "%d %x", i, entry ); 
+  
+    if ( entry->DIR_Attr == ATTR_LONG_NAME) { 
+      tmp= add_long_dir(((LONG_ENTRY_FAT* *)&entry));
+      tmp->cluster_dir=first_cluster; 
+      tmp->offset=0; 
+    }//----------------????????????????????????????????????????????????????????????????
+     else  { 
+    	 add_short_dir(&entry); 
+    }
+
+      print_fcb(tmp); 
+    i++;
+    }
+    
+
+  mem_free(cluster); 
+
+}
+
+
+
+void print_fcb ( const FCB * fcb) { 
+  
+  flog(LOG_DEBUG, "Name :%s\n" ,fcb->name); 
+  flog(LOG_DEBUG, "Cluster :%x\n", fcb->first_cluster); 
+  flog(LOG_DEBUG, "CLuster Dir  :%x\n", fcb->cluster_dir); 
+  // flog(LOG_DEBUG, "Name :%s\n" fcb->name); 
+  //flog(LOG_DEBUG, "Name :%s\n" fcb->name); 
+}
+
+
+
+#define SIZE_NAME 260
+
+ FCB *  add_long_dir (  LONG_ENTRY_FAT  ** dir) { 
+
+     FCB * fcb= NULL; 
+     char name[SIZE_NAME]; 
+     int n_entry=0; 
+     int i =0; 
+     if(dir==NULL) 
+       return NULL; 
+    
+
+   memset(name, 0, SIZE_NAME);
+ 
+
+    //flog(LOG_WARN , "ORD: %x", (*dir)->LDIR_Ord); 
+    
+    if((*dir)->LDIR_Ord > 0x40)  
+      n_entry= ((*dir)->LDIR_Ord-0x40);
+    else 
+      return NULL; // errore 
+
+
+    for ( i=0; i < n_entry; i++, (*dir)++)  {
+
+     if( (*dir)->LDIR_Name3[0]!=0xFFFF ) 
+	//	flog(LOG_WARN, "3 %x", (*dir)->LDIR_Name3[0]);
+       insert_part_name( (*dir)->LDIR_Name3, name, 2);
+		
+		//flog(LOG_WARN, "2 %x", (*dir)->LDIR_Name2[0]);
+     if( (*dir)->LDIR_Name2[0]!=0xFFFF ) 
+	     insert_part_name( (*dir)->LDIR_Name2, name, 6);
+		
+        //  flog(LOG_WARN, "1 %x", (*dir)->LDIR_Name1[0]);
+     if( (*dir)->LDIR_Name1[0]!=0xFFFF ) 
+	     insert_part_name( (*dir)->LDIR_Name1, name, 5);  
+ }  
+
+
+   fcb=(FCB*)add_short_dir( (SHORT_ENTRY_FAT**)dir); 
+   memset(fcb->name, 0, SIZE_NAME); 
+   strncpy(fcb->name, name, SIZE_NAME); 
+
+     return fcb; 
+
+  }
+
+ FCB *  add_short_dir (  SHORT_ENTRY_FAT  * * dir) { 
+
+     FCB * fcb= NULL; 
+    
+
+     if(dir==NULL) 
+                  return NULL; 
+  
+     fcb=(FCB*)mem_alloc(sizeof(fcb), 1); 
+     memset(fcb, 0, sizeof(fcb)); 
+
+     fcb->mode=(*dir)->DIR_Attr;  
+     strncpy(fcb->name, (*dir)->DIR_Name, 11); 
+
+     // fcb->first_cluster=(dword)(dir->DIR_FstClusLO); 
+
+     fcb->first_cluster=(((dword )((*dir)->DIR_FstClusHI) << 16 ) | (dword)((*dir)->DIR_FstClusLO));   // primo cluster of chain individua il file     
+     
+     // dobbiamo inserire i dati relativi all'ora e la data 
+
+     // se sono qui sono già sicuro che si tratta di un cartella piccola 
+
+     (*dir)++; 
+
+     return fcb; 
+
+  }
+
+
+
+/*
+ *Il Nome del file Lo gestiamo come una pila , inseriamo sempre in testa 
+ * questo perchè la lista la scorriamo dall'ultimo elemento :
+ * Questa funzione trasforma da unicode as asci (7 bit) il nome salvato
+ * nel disco 
+ * NAME :  parte del nome del file UNICODE 
+ * BUF     . Buffer del FCB nel qual inseriamo il nome
+ * SIZE    . Grandezza di name (word) 
+*/ 
+ 
+
+void insert_part_name ( const word * name, char * buf, int size) { 
+
+  char buf_tmp[7]; // buffer temporaneo usato per l'allocazione del buffer trasformato ;  
+  char * pos_buf =buf+size;
+  int i=0, size_buf= strlen(buf); 
+	
+  memset(buf_tmp, 0, sizeof(buf_tmp)); 
+
+  for( i=0; i<size; i++, name++) 
+	    buf_tmp[i]= (*(char *)(name)); 
+	
+ // flog(LOG_WARN, " NAME  %s", buf_tmp); 
+
+
+  if (buf[0]==0 ) 
+	    strncpy( buf,buf_tmp,size); 
+  else  { 
+	  	for ( i=size_buf;i >=0; i--)  
+			  *(buf+i +size)=*(buf+i); 
+	        strncpy(buf, buf_tmp , size); 
+  } 
+
+//	flog(LOG_WARN, " NAME kk %s", buf); 
+//	flog(LOG_WARN, " l:%d ", strlen(buf)); 
+}
+
+
+
+//FUNZIONE CHE CREA UN ENTRY nuova
+
+FCB * create_dir_entry ( byte label, dword first_cluster, const char*name ) { 
+
+	// dobbiamo verificare di quanti cluster è composta la mia cartella 
+	
+  TABELLA_VOLUMI * tab=get_volume(label); 
+  dword  size_cluster = (tab->fat_info.sectors_for_cluster)*(tab->fat_info.byts_for_sector); 
+  void * cluster = (void*) mem_alloc(size_cluster,1); 
+  dword first_sector=0;
+  int i=0; 
+
+	// manca verifica univocita del cluster 
+	
+
+
+	flog(LOG_WARN , "FUNZIONE CREAZIONE DIR_ENTRY" ); 
+	
+  if ( first_cluster < 2) 
+    flog(LOG_WARN, "ERRORE"); 
+  if ( !tab) 
+    flog(LOG_WARN," ERRORE"); 
+
+
+  flog(LOG_WARN, " INserisco in memmoria %d %c", size_cluster, tab->label); 
+
+  // prima di leggere devo trasformare il cluster in primo settore 
+  first_sector=FirstDataSectorOfCluster(first_cluster,
+                                                                          tab->fat_info.sectors_for_cluster,
+					                                  tab->fat_info.first_set_data); 
+
+  //  flog(LOG_WARN, "Settore %d", tab->fat_info.first_set_data);
+  //flog(LOG_WARN , "Cluster Root : %d", tab->fat_info.first_cluster_directory);  
+
+  read_part_n(tab->ata, tab->disco, tab->indice_partizione, first_sector,
+	                tab->fat_info.sectors_for_cluster, (void*)cluster); 
+
+	get_free_entry()
+
+}
+
+
+dword_ptr get_free_entry( dword_ptr cluster. quante  ) { 
+
+
+	SHORT_ENTRY_FAT * dir=(SHORT_ENTRY_FAT*)cluster; 
+	int number = 4096/32; 
+	
+	if ( !cluster) 
+			return NULL; 
+	
+	for ( i=0; i<number; i++) 
+			if(dir->DIR_Name[0]==0x00)
+				return dir; 
+
+	return FALSE; 
+}
+
+/***********FAT ***************************************************************************************
+
+Utiliziamo il file system fat introdotto con windows 95 o meglio la struttura BPB fondamentale 
+per il corretto funzionamento. 
+Usiamo lo stesso modello Micro$oft per analizare il filesystem vedi dopo
+
+-Assuminamo che i settori siano da 512 byte 
+ 
+ Il filse system fat è diviso in tre parti separate : 
+     0-REserved Region 
+     1-FatRegion 
+     2-Root Direcoty Region ( non esiste su fat32) 
+     3-File e Directory 
+   
+ +----------------------------------------------+-------------+-----------------+---------------------------------+
+ | AREA RISERVATA                               |FAT          | ROOT DIRECTORY  |  REGIONE DATI |
+ +------------------+-------------+-------------+------- ------+-----------------+---------------+
+ | Settore d'avvio  | Info FS        | RISERVATI   | FAT1 | FAT2 | Roott directory | Dati          |
+ | (BPB+altro)       | Solo Fat32  | Opzionale   |      |      | FAT12 FAT 16    |               |
+ +------------------+-------------+-------------+------+------+-----------------+---------------+
+ |n_sec_reserved                                | n_fat*fats  |RootDirSector    |numero_di_c    |
+ +----------------------------------------------+-------------+-----------------+---------------+
+
+
+
+*******************************************************************************************************/ 
+// 
+#ifndef FAT_H
+#define FAT_H
+
+#include <type.h> 
+#include <mbr.h> 
+#include <fs.h>
+
+#define BOOT_SIG 0x29    // parametri di boot estesi 
+#define BPB_SIZE 512
+
+
+#define EOC_32      0x0FFFFFF8 
+#define MASK_32    0x0FFFFFFF
+
+
+/*ENTRY DIR */ 
+
+#define FREE             0xEA                //direcotory libera
+#define ALL_FREE    0x00                // finite le direcotry 
+
+#define ATTR_READ_ONLY      0x01 
+#define ATTR_HIDDEN              0x02 
+#define ATTR_SYSTEM              0x04 
+#define ATTR_VOLUME_ID       0x08
+#define ATTR_DIRECTORY      0x10 
+#define ATTR_ARCHIVE            0x20 
+#define ATTR_LONG_NAME     ATTR_READ_ONLY  | ATTR_HIDDEN | ATTR_SYSTEM | ATTR_VOLUME_ID 
+
+/*******************STRUTTURE FAT BASE ****************************************************************/
+/* 
+ BPB usato per i filesystem FAT12 FAT 16 
+*/ 
+
+
+typedef struct _BPB_16_ {
+  
+  byte  BS_DrvNum;         // numero drive 
+  byte  Reserved1;         // byte iservato per Windows NT 
+  byte  BS_BootSig;        // se è uguale 0x29 (boot signature ) sono settati i valori successi
+  dword BS_VolID;          // volume serial number 
+  byte  BS_VolLab[11];     // Ettichetta registrata nella root directori
+  byte  BS_FilSysType[8];  // tipo file system 
+
+}__attribute__((packed))BPB_16;  
+
+
+/* 
+ BPB usato per i filesystem FAT12 FAT 16 
+*/ 
+
+typedef struct _BPB_32 { 
+
+  dword  BPB_FATsz32;                //grandezza FAT for FAT32 in settori  
+  word   BPB_ExtFlags;              // estesi flag vedi specifiche 
+  word   BPB_FSVer;                 // versione di FAT32 viene attivata con i flag precedenti 
+  dword  BPB_RootClus;              // imposta il numero (indirizzo) del primo cluster dellaroot directory ---- WARNIN----
+  word   BPB_FSInfo;                // numero settore nella regione riservata che contiene la struttura FSINFO  
+  word   BPB_BkBootSec;             // indica il settore di backup del boot sector 
+  byte   BPB_Reserved[12];          // riservato per futuri uytilizzi
+ 
+  byte  BS_DrvNum;                    // numero drive 
+  byte  Reserved1;                    // byte iservato per Windows NT
+  byte  BS_BootSig;                   // 0x29 boot signature 
+  dword BS_VolID;                     // volume serial number 
+  byte  BS_VolLab[11];                // Ettivchetta registrata nella root directori
+  byte  BS_FilSysType[8];             // tipo file system 
+}__attribute__((packed))BPB_32;
+
+
+
+/*
+ *BPB  sara un po piu complessa ( usa le unioni per le parti non comuni 
+ */
+
+
+typedef struct _BPB_ {
+
+  /* Fine tratto comune fra  FAT12/16/32 */ 
+
+  byte BS_jmpBoot[3];     // istruzione di salto ????????
+  byte BS_OEMName[8];     // stringa, nome del sistema su cui è stato formatato il disco (mkmsdos) 
+  
+  word BPB_BytsPerSec;    // Byte per settore ( tipicamente 512) 
+  byte BPB_SecPerClus;    // Numero di settori per unita di allocazione, deve essere una potenza di due  
+
+  /* N.B  Il numero di byte per unita di allocazione  deve essere sempre minore di 32k 
+   * bytePerSec * SecPerClus < 32k
+   */
+
+  word  BPB_RsvdSecCnt;  // numero di settori riservati vedi apppunti Non puo essere zero 
+                         // fat12/16 non puo essere diverso da zero 
+                         // fat32   tipicamnete 32 
+
+  
+  byte BPB_NumFATs;      //  numero di tabelle ridondanti presenti nel volume tipicamnete 2 
+                         // ed è fortamente racomandato  MI$CROSFT è che sia 2 
+
+  /* Questo campo contiene il numero di voci presenti nella cartella di root! 
+   * vale zero per il fat 32 mentre assume senso per i vari fat12/16! vedi regole nel documento */ 
+
+  word BPB_RootEntCnt;   
+
+  word BPB_TotSec16;    // numero totale di settori per volume  
+
+  byte BPB_Media;       // diferernzia volumi rimovibili e volumi fissi 
+
+  word BPB_FATSz16;     // vale solo per fat12/16 indica la grandezza della fat in settori 
+
+  word BPB_SecPerTrk;   // questo campo contien i settori per traccia vale per dispositivi mobili
+ 
+  word BPB_NumHeads;    // n umero di testine come prima 
+ 
+  dword BPB_HiddSec;    // Numero di settori che precedono la partizione che contiene questo volume
+
+  dword  BPB_TotSec32;  // numero settori tottali nel volume per fat32 
+
+  /* Fine tratto comune fra  FAT12/16/32 */ 
+
+  union { 
+    BPB_16 bpb_16; // BPB 12/16 
+    BPB_32 bpb_32; 
+  }; 
+ 
+  byte body[420]; 
+  byte magic_number[2]; 
+}__attribute__((packed))BPB; 
+  
+
+typedef struct _CLUSTER_LIST_  CLUSTER_LIST; 
+
+// SOLO FAT 32
+
+struct   _CLUSTER_LIST { 
+  dword  cluster; 
+  CLUSTER_LIST  *next; 
+};
+
+/******************* END STRUTTURE FAT BASE ****************************************************************/
+
+
+
+/*********************************************MACRO**********************************************************/
+
+/* Individuiamo la regione dei dati mediante l'indirizzo al primo settore 
+   Calcoliamo il FirstDataSector=
+   FirstDataSector = Reserved Region + FatRegion + Root Direcoty Region ( non esiste su fat32)
+  
+   1) Ci serve sapere la grandezza della regione riservata!! ??
+   2) Grandezza regione fat  ??  
+   3) Root Direcory ????
+
+   1) E' un campo del BPB : DWORD BPB_RsvdSxecCnt (offset 14 ) grandezza espressa in settori 
+   2) grandezza della regione fa, sarà uguale a FatSize * numero di fat 
+   3) nel caso sia presente la root directory ( filesystem 16/12 ) dobbiamo sapere quando è grande 
+
+   -----> calcolo grandezza root directory 
+   la grandezza della root directory sara uguale a :  numero entry * sizeof(entry) [ 32 byte ] 
+
+
+  Primo settore dei dati = BPB_RsvdSecCnt + (BPB_NumFatsz) + RootDirSectors  ( indirizzo riferito al primo settore del volume che contien e il BPB 
+
+   ...
+
+// COme faccioa ad individuare la FAT???
+
+*/ 
+
+
+
+/*ROOT_DIR_SECTOR : 
+ *Calcola la grandezza della root directori nei file system FAT16 FAT 12 *
+ *************************************************************************/
+
+#define RootDirSector(n_ent_root, byts_for_sect)  (((n_ent_root*32)+(byts_for_sect-1))/byts_for_sect) 
+
+/*FIRST_DATA_SECTOR
+ *Calcola il primo settore della regione dati relativo all'inizio del volume 
+ */
+
+#define FirstDataSector(n_sect_reserved, n_FATs, FAT_size, root_dir_sector)  n_sect_reserved + (n_FATs * FAT_size) + root_dir_sector 
+
+/* SIZE_DATA
+ * Calcolo grandezza area  dati in settori 
+ */
+
+#define SizeData( n_cluster, setor_for_cluster) n_cluster*sector_for_cluster
+
+/*FIRST_DATA_SECTOR
+ *Primo settore di un cluster N puo esere realativo al disco o al volume in base al valore di first_data_sector 
+ */
+#define FirstDataSectorOfCluster(N, set_for_cluster, first_data_sector) (((N-2)*set_for_cluster)+first_data_sector)
+
+/*FAT_SIZE *
+ *Grandezza regione FAT in settori
+ */ 
+
+#define FATsize( FAT16_size, FAT32_size) (FAT16_size != 0) ? FAT16_size : FAT32_size 
+
+/*FIRST_sect_FAT 
+  Primo settre della fat 
+*/ 
+#define FirstSectFAT(n_sect_reserved) n_sect_reserved
+
+#define LastSectFAT(First, size) First+size 
+
+/*TOT_SECTOR
+ *TOttale settori del disco 
+ */ 
+
+#define TotSector(TotSect16, TotSect32) (TotSect16 != 0) ? TotSect16 : TotSect32
+
+/* Data SIZE 
+ * Grandezza della regione dati in settori 
+ */ 
+#define DataSize( tot_sec, n_sect_reserved, n_FAT, FAT_size, root_dir_sector) tot_sec-( n_sect_reserved + (n_FAT * FAT_size) + root_dir_sector)
+
+
+/* Data SIZE CLUSTER
+ * Grandezza della regione dati in cluster 
+ */ 
+#define DataSizeCluster( DataSize, set_for_cluster) DataSize / set_for_cluster 
+
+/* getSectRoot */ 
+#define FirstRootDirSecNum(n_sect_reserved, n_FAT, FAT_size) n_sect_reserved + ( n_FAT*FAT_size)
+
+
+/* Dato un cluster_number N, dove nella FAT è il record per quel cluster numero?  
+ */ 
+
+#define FATsectorNum( N, FirstSectFat, type, byte_for_sect)  FirstSectFat + ( N* ((type == FAT16) ? 2 : 4))/byte_for_sect
+
+#define FATOffset( N, type, byte_for_sect)   ( N* ((type == FAT16) ? 2 : 4))%byte_for_sect
+
+
+
+/* PER LA MEMORIA*/ 
+// Dato l'indirizzo della fat ritorna 
+
+//#define getNext ( fat, cluster) 
+
+
+
+/************************************************************END MACRO*************************************************************/
+
+
+
+// Poiche il dirver lavora su  
+
+
+/*
+unsigned char FAT_table[cluster_size];
+unsigned int fat_offset = active_cluster * 4;
+unsigned int fat_sector = first_fat_sector + (fat_offset / cluster_size);
+unsigned int ent_offset = fat_offset % cluster_size;
+ 
+//at this point you need to read from sector "fat_sector" on the disk into "FAT_table".
+ 
+//remember to ignore the high 4 bits.
+unsigned int table_value = *(unsigned int*)&FAT_table[ent_offset] & 0x0FFFFFFF;
+ 
+//the variable "table_value" now has the information you need about the next cluster in the chain.
+
+
+//strutture che non fanno parte di questo file 
+*/ 
+
+
+
+typedef struct _SHORT_ENTRY_FAT_ { 
+  byte DIR_Name[11]; // nome corto 
+  byte DIR_Attr;     // attributi 
+  byte DIR_NTRes;    // riservato per windows nt
+  byte DIR_CrtTimeTenth; // vedi specifiche 
+
+  word DIR_CrtTime ;  // ora di creazione 
+  word DIR_CrtDate; // data di creazione 
+  word DIR_LstAccDate; // Ultimo accesso
+
+  word DIR_FstClusHI; // parte alta indirizzo clusterFAT32 
+
+  word DIR_WrtTime ;  // ora di scrittura 
+  word DIR_WrtDate; // data discrittura
+  word DIR_FstClusLO; // Parte bassa dell'indirizzo   
+
+  dword DIR_FileSize; // grandezza del file in byte 
+
+} __attribute__((packed))SHORT_ENTRY_FAT;  
+
+
+//typedef struct _LONG_ENTRY_FAT LONG_ENTRY_FAT;
+
+typedef struct _LONG_ENTRY_FAT_ { 
+  byte    LDIR_Ord;     // Ordine delle entrate 
+  word  LDIR_Name1[5];   // 1-5  
+  byte    LDIR_Attr;    // attributo ( directory lunga)
+  byte    LDIR_Type;    // e 
+
+  byte  LDIR_Chksum ;       // Checksum, 
+  word LDIR_Name2[6];     // data di creazione 
+  word LDIR_FstClusLO;   // Deve essere zero
+  word LDIR_Name3[2];     //  
+
+  //  LONG_ENTRY_FAT * next_long_entry;  // prossima tabella  
+
+}__attribute__((packed))LONG_ENTRY_FAT;  
+
+
+
+/*entry fat*/ 
+
+typedef struct _ENTRY_FAT_ { 
+  
+  SHORT_ENTRY_FAT short_entry; 
+  LONG_ENTRY_FAT * long_entry;  
+
+}ENTRY_FAT; 
+
+
+
+
+/*FUNZIONI************************************************************************************************************************/
+
+/*Solo FAT32 */ 
+
+/* FUNzione che determina precisamente che tipo di file sistem è 
+   Seguo loa standard micro$oft
+*/
+
+byte getFileSystemType ( dword DataSizeCluster ); 
+
+/* Funzione che analizza la FAT e riporta la lista di cluster di un FILE 
+CLUSTER_LIST  get_chain_cluster ( dword first_cluster); 
+*/ 
+
+/* Funzione dato il cluster mi rendono il settore */  
+
+
+// QUESTE SONO LE FUNZIONI CHE MI ASTRAGONO IL FILE DAI SETTORI E CLUSTE E LO MOSTRANO COME INSIEME DI BYTE 
+dword  get_cluster( dword offset, CLUSTER_LIST ); 
+dword  get_cluster_offset ( dword  offset, CLUSTER_LIST); 
+
+
+
+/*
+// funzione che rende la lista del entry di una directory a partire dalla lista dei cluster; 
+list_entry_fat * get_dir_entry( list_cluster_dir * list); // lavora nella regione dati 
+lista_cluster *  get_chain_cluster ( first_cluster); 
+dword write_sect(dword number_of_sector , buff, size_guff); 
+dword read_sect(dword number_of_sector, buff, size_buff); 
+
+
+
+sector get_settore ( offset, cluster); 
+sector get_settore_offset ( offset, cluster); 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+lista_cluster get_free_cluster(size); 
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+*/
+
+
+
+BOOL init_fat();
+
+dword getNext( dword_ptr fat , dword cluster);   // lavora su fat 
+/***********************************************************************************/
+
+/*GESTIONE CARTELLE A BASSO LIVELLO */ 
+
+/*FUNZIONE 
+ *Estrae dal disco la lista dei FCB contenuti in una cartella, individuata da
+ * label ( per individuare il volume),first_cluster per individuare il primo 
+ * Cluster della catena di cui la tabella è composta
+ */ 
+void  get_dir_entry(byte,  dword  first_cluster); // lavora nella regione dati 
+
+/*Funzione che crea un entry nella directory specificata da label cluster 
+  con il nome passato come argomento, rende il fcb del nuova entry
+ */ 
+FCB * create_dir_entry(byte label, dword first_cluster, const char * name_entry);
+
+/* FUNZIONE CHE elimina un entry */
+
+BOOL delete_dir_entry(FCB* file); 
+
+
+
+void print_list_entry_dir ( void); 
+/***********************************************************************************/
+
+
+
+
+
+
+#endif 
+
+
+/**************************************************************FILE SYSTEM ***********************************/
+
+#include <fat.h>
+#include "fs.h" 
+#include "type.h"
+#include "sistema.h" 
+#include "volumi.h"
+
+
+int fs_init(); 
+
+
+/*STRUTTURE DATI GBOLBALI */
+TABELLA_VOLUMI * tabella=NULL; 
+
+
+
+int  fs_init(void){ 
+
+  
+  flog(LOG_INFO, " Inizialiazzazione FILE SYSTEM "); 
+
+
+  tabella=crea_tabella_volumi();  // crea la tabella legendo dal BPB
+
+  init_fat();// carica la fat in memoria 
+  
+  //stampa_tabella_volumi(tabella);   //DEBUG
+
+  //flog(LOG_INFO, " aaa : %x", getNext(tabella->fat, 2)); 
+
+  //get_dir_entry('C', 2); 
+
+
+  create_dir_entry('C', 2, "pippo.txt"); 
+
+  flog(LOG_INFO,"END Inizializzazione FILE SYSTEM"); 
+
+
+  return 1; 
+}
+
+
+
+
+#ifndef FS_H 
+#define FS_H 
+
+
+/*struttre che mi permettono l'astrazzione del file system*/ 
+
+
+typedef struct _FCB_{ 
+  char name[260]; 
+
+  dword pos_corr; // posizione corrente   
+  byte loock; // 
+  byte mode;  // inutili in questo caso 
+
+  dword  first_cluster;  // primo cluster of chain individua il file     
+  
+  dword cluster_dir;    // cluster della direcotory padre
+  dword offset ;          // offset in byte 
+}__attribute__((packed))FCB; 
+
+
+typedef struct _DIRECTORY_ DIRECTORY; 
+
+struct _DIRECTORY_ { 
+
+  char path[255]; 
+  char name [255]; 
+
+  byte dispositivo; // servono per essere generale  
+  byte fileSystem;  // idem 
+
+  byte loock; // 
+  byte mode;  // inutili in questo caso 
+
+  void * physic_des; // (puo puntare ad una cluster fat o un indoe ext ) 
+  
+
+}; 
+
+
+
+
+#endif 
+
+
+/*HEADER
+ *Interfaccia per la gestione dell'MBR per poter gestire i volumi presenti su un disco
+ */ 
+
+#ifndef MBR_MY
+#define MBR_MY
+
+#include "type.h" 
+
+
+/*[DEFINE]-----------------------------------------------------------*/
+#define EMPTY 0x00
+#define FAT12 0x01 
+#define FAT16 0x06
+#define FAT32 0x0B
+#define EXTEND 0x05
+
+#define MBP_SIZE 446 
+#define MBT_SIZE 64
+#define MBR_SIZE 512 
+
+/*-----------------------------------------------------------------*/
+
+
+/*[STRUTTURE DATI]-------------------------------------------------*/
+
+
+
+/* Layout dei recodr della BMT 
+  +--------------------------------------------------------+
+  |OFFSET| SIZE | DESCRIPTION                              |
+  +--------------------------------------------------------+
+  |0x00  |  1   | FLAG boot 0x00 (non attivo ) 0x80 attivo |
+  +--------------------------------------------------------+
+  |0x01  |  3   | CHS ADDRESS FIRST                        |
+  +--------------------------------------------------------+
+  |0x04  |  1   | TYPE                                     |
+  +--------------------------------------------------------+
+  |0x05  |  3   | CHS ADDRESS LAST                         |
+  +--------------------------------------------------------+
+  |0x08  |  4   | LBA                                      | 
+  +--------------------------------------------------------+
+  |0x0C  |  4   | NUMBER SECTOR                            | 
+  +--------------------------------------------------------+
+
+ Formally, status values other than 0x00 and 0x80 are undefined.
+
+ Starting Sector fields are limited to 1024 cylinders, 255 heads,
+ and 63 sectors;[citation needed]. Ending Sector fields have the 
+ same limitations.
+
+ The range for sector is 1 through 63; the range for cylinder is 
+ 0 through 1023; the range for head is 0through 254 inclusive.
+
+ The 10-bit cylinder value is split into two bytes. The value
+ can be reassembled using this formula: 
+  cylinder = ((byte[2] & 0xc0) << 2) | byte[3]
+*/
+ 
+typedef struct _RECORD_MBT_ { 
+ 
+  byte boot_flag;
+  byte chs_first_sector[3];
+  byte type;
+  byte chs_last_sector[3]; 
+  dword lba; 
+  dword number_sectors; //Number of sectors in partition
+
+}RECORD_MBT; 
+
+/*MBT */
+typedef struct _MBT_ { 
+        RECORD_MBT record_mbt[4]; 
+}MBT; 
+
+/*MBP*/
+typedef struct _MBP_ { 
+        byte body[446]; 
+}MBP; 
+
+/*Struttura del Master Boot Record , è presente nel primo settore del disco 
+ * , ha una grandezza di 512 byte ( grandezza settore ).
+ * E' composto da due parti: 
+ *      - MBP : codice che viene messo in esecuzione dal BIOS ( generlmente
+ *              carica il bootmanager. SIZE 446 byte
+ *      - MBT : tabella delle partizioni , 4 record da 16 byte.
+ * 
+         +------------------------------------------------------+
+         | HEX | DEC |       CONT                 |       SIZE  |
+         +------------------------------------------------------+
+         |0000 |0    | code area                  |440(max. 446)|
+         +------------------------------------------------------+
+         |01B8 |440  |disk signature (optional)   |4            |
+         +------------------------------------------------------+
+         |01BC |444  |Usually nulls;0x0000        | 2           |
+         +------------------------------------------------------+
+         |01BE |446  |Table of primary partitions |64           |
+         -------------------------------------------------------+
+         |01FE |510  |  0xAA55  MBR signature;    | 2           |
+         +------------------------------------------------------+
+
+*/
+
+//#pragma pack(1) 	// alineo la struttura al byte altrimenti non funziona 
+
+
+typedef struct _VOLUME_LIST_ VOLUME_LIST; 
+typedef RECORD_MBT RECORD_VOLUME; 
+
+// Struttura per la gestione dei volumi 
+ 
+struct _VOLUME_LIST_ { 
+  RECORD_VOLUME record_volume; 
+  VOLUME_LIST * next;  
+};  
+
+// struttura di un indirizzo CHS
+
+typedef struct _CHS_ { 
+  byte head; 
+  word cylinder;
+  byte sector;  
+
+}CHS; 
+
+typedef struct _MBR_ { 
+        MBP mbp;    
+        MBT mbt ; 
+        byte magic_number[2]; 
+}__attribute__((packed)) MBR; 
+
+/*INTERFACIA*********************************************************/
+
+
+// vrea la lista dei volumi sul disco 
+//( Analizza anche le partizioni estese e ci porta una lista trasparente) 
+VOLUME_LIST * get_list_volume ( int); 
+//STAMPA la lista dei volumi 
+void stampa_list_volume(VOLUME_LIST *); 
+// elimina la lista dei volumi 
+BOOL delete_list_volume (VOLUME_LIST **);
+// ritorna il primo settore CHS del volume
+CHS get_first_sector ( RECORD_VOLUME * record);
+// ritorna l'ultimo settore CHS del volume 
+CHS get_last_sector ( RECORD_VOLUME * record);
+// verifica che ci sia un magic number
+BOOL check_boot_sector ( MBR  * j); 
+/********************************************************************/
+
+#endif 
+;; Object prova
+;; EDE project file.
+(ede-proj-project "prova"
+  :name "prova"
+  :file "Project.ede"
+  :targets (list 
+   (ede-proj-target-makefile-miscelaneous "p"
+    :name "p"
+    :path ""
+    :source '("fat.c")
+    )
+   )
+  )
+/*SISTEMA.H 
+ *FIle di interfaccia con in modulo sistema
+ */
+
+
+#ifndef INTERFACCIA_SISTEMA_H 
+#define INTERFACCIA_SISTEMA_H 
+
+#include <tipo.h>
+
+
+ int get_partizione ( dword  ata, natl disco , natl tipo, int indice); 
+ int read_part_n  (natl ata, natl disco, natl indice_partizione, natl indice_settore, natl n_blocchi, void * buf);
+ int write_part_n (natl ata, natl disco, natl indice_partizione, natl indice_settore, natl n_blocchi, void * buf); 
+ void flog(log_sev, cstr fmt, ...);
+void *memset(void *dest, int c, unsigned int n);
+void *memcpy(void *dest, const void *src, unsigned int n);
+void* mem_alloc(natl dim, natl balign );
+void mem_free(void *p);
+natl strlen(const char *s);
+char *strncpy(char *dest, const char *src, unsigned long l);
+#endif
+
+
+#ifndef TYPE_MY
+#define TYPE_MY
+/*DEFINIZIONE DATI */ 
+ 
+typedef unsigned char     byte; 
+typedef unsigned short	  word; 
+typedef unsigned int   	  dword;
+typedef unsigned long int lword; 
+typedef unsigned int  	 BOOL;  
+
+typedef dword * dword_ptr;
+
+#define NULL 0 
+#define TRUE  1 
+#define FALSE 0
+
+#include <tipo.h>
+
+#endif 
+
+
+#include <volumi.h>
+#include <type.h> 
+#include <sistema.h>
+
+
+BOOL  aggiungi_partizione ( TABELLA_VOLUMI ** tabella, natl ata, natl disco, natl indice) ;
+void stampa_entry_tabella_volumi(const TABELLA_VOLUMI *); 
+
+extern TABELLA_VOLUMI * tabella; 
+
+TABELLA_VOLUMI * crea_tabella_volumi() { 
+
+  // per prima cosa devo prelevare la lista delle partizioni 
+  // L'insieme  delle partizioni è inserito nei descittori di interfaccia dei vari device 
+  // Questo kernel al massimo puo gestire 4 hardisk ( 2 per ogni canale ATA ) 
+  // per fare questo uso una routine di LIV_KERNEL che rende una partizione una per volta 
+
+  TABELLA_VOLUMI *tabella=NULL; 
+  int indice_partizione=0; 
+  int i,j,indice=0; 
+
+   // dischi li classifichiamo com hda hdb hdc hdd 
+   // l'indirizzo zero nelle catene identifica il disco, quindi le varie partzioni 
+   // partono da 1 e cosi via
+
+   
+   for ( i=0; i<N_ATA; i++ )   { 
+      for ( j=0; j<N_DISK; j++)  {
+	flog(LOG_WARN, "DISCO : %d %d", i,j);
+	  
+	    for (  indice=0; ; indice++) 
+	        if ((indice_partizione=get_partizione(i,j, FAT32, indice)) == -1) 
+	           break; 
+		else { 
+		  indice=indice_partizione;
+		     flog(LOG_WARN, "Partizione FAT32 %d", indice_partizione); 
+		      aggiungi_partizione(&tabella, i, j, indice_partizione); 	
+		   }
+
+	    for (  indice=0; ; indice++) 
+	        if ((indice_partizione=get_partizione(i,j, FAT16, indice)) == -1) 
+	           break; 
+		else {
+		    indice=indice_partizione;
+		     aggiungi_partizione(&tabella,i,j,indice_partizione); 
+		    flog(LOG_WARN, "Partizione FAT16 %d", indice_partizione); 
+		  }
+
+	    for ( indice=0; ; indice++) 
+	        if ((indice_partizione=get_partizione(i,j, FAT12, indice)) == -1) 
+	           break; 
+		else {
+		   indice=indice_partizione;
+		    aggiungi_partizione(&tabella,i,j, indice_partizione); 
+		   flog(LOG_WARN, "Partizione FAT12 %d", indice_partizione); 
+	    
+		   }
+      }  
+      }
+
+   
+  return tabella; 
+        
+}
+
+
+BOOL  aggiungi_partizione ( TABELLA_VOLUMI ** tabella, natl ata, natl disco, natl indice) {
+
+  BPB *  bpb=(BPB*)mem_alloc(BPB_SIZE, 1);  // informazioni volume fat
+  TABELLA_VOLUMI *new_tabella=(TABELLA_VOLUMI* )mem_alloc(sizeof(TABELLA_VOLUMI),1); 
+  static byte label='C'; 
+
+  memset(bpb, 0, BPB_SIZE);
+  memset(new_tabella,0, sizeof(TABELLA_VOLUMI));
+
+  /*NB la grandezza */ 
+
+  byte  set_for_cluster=0;
+  word  root_dir_sector=0; 
+  word  byts_for_sect=0;
+  word  n_sect_reserved=0; 
+  word  n_ent_root=0;
+  byte  n_FAT=0;
+  dword data_size; 
+  dword FAT_size=0;  
+  dword tot_settori=0;  
+  dword data_size_cluster=0; 
+  dword last_set_data=0; 
+  dword first_set_data=0; 
+  dword first_set_FAT=0; 
+
+    if(tabella==NULL) {
+      mem_free(new_tabella); 
+      mem_free(bpb); 
+      return FALSE;
+    } 
+
+      new_tabella->next=*tabella; 
+    *tabella=new_tabella; 
+   
+   
+  // Leggo il BPB  // 
+    if(read_part_n(ata, disco, indice , 0, 1, (void*)bpb) < 0 ) 
+      flog(LOG_WARN , "ERRORE READ "); 
+  
+ // VERIFICO SE É IL SETTORE DI BOOT 
+    if( check_boot_sector((MBR *)bpb) == TRUE)
+         flog(LOG_WARN, "BPB correct\n"); 
+    else {
+         flog(LOG_WARN, "BPB incorrent\n"); 
+    }
+  
+    // inserisco i dati record dalla tabella dei volumi; 
+    
+    /* Gestione settori e Cluste */
+    set_for_cluster=bpb->BPB_SecPerClus;
+    byts_for_sect=bpb->BPB_BytsPerSec; 
+    n_FAT=bpb->BPB_NumFATs; 
+     FAT_size=FATsize(bpb->BPB_FATSz16,bpb->bpb_32.BPB_FATsz32);
+    n_sect_reserved=bpb->BPB_RsvdSecCnt;
+    n_ent_root=bpb->BPB_RootEntCnt; 
+    first_set_FAT=FirstSectFAT( n_sect_reserved);
+    tot_settori=TotSector(bpb->BPB_TotSec16, bpb->BPB_TotSec32);
+
+    /* Gestione regione dati */
+    flog(LOG_WARN, " Settori Riservati %d  n_fat  %d, Fat Size %d",  n_sect_reserved, bpb->BPB_NumFATs, FAT_size);
+
+     data_size=DataSize( tot_settori, n_sect_reserved, bpb->BPB_NumFATs, FAT_size, root_dir_sector); 
+    data_size_cluster=DataSizeCluster( data_size, set_for_cluster); 
+    first_set_data= FirstDataSector( n_sect_reserved,n_FAT, FAT_size,root_dir_sector); 
+    last_set_data = first_set_data + data_size;     
+
+    new_tabella->type_fs=getFileSystemType (data_size_cluster);
+    new_tabella->ata=ata; 
+    new_tabella->disco=disco; 
+    new_tabella->indice_partizione=indice; 
+    new_tabella->label=label;
+
+    label++; // incremento l'eticheta; 
+
+    new_tabella->fat_info.sectors_for_cluster=set_for_cluster; 
+    new_tabella->fat_info.byts_for_sector=bpb->BPB_BytsPerSec;
+  
+    new_tabella->fat_info.first_set_data=first_set_data; 
+    new_tabella->fat_info.size_data=data_size; 
+
+    tot_settori=TotSector(bpb->BPB_TotSec16, bpb->BPB_TotSec32);
+ 
+    
+    new_tabella->fat_info.first_set_fat=first_set_FAT; 
+    new_tabella->fat_info.size_fat=FAT_size; 
+
+    new_tabella->fat_info.first_cluster_directory= (bpb->bpb_32.BPB_RootClus); 
+
+   
+
+    return FALSE; 
+}
+
+ 
+ void stampa_tabella_volumi( const TABELLA_VOLUMI * list) { 
+  if ( list == NULL) 
+    return; 
+  
+  stampa_entry_tabella_volumi(list); 
+  stampa_tabella_volumi(list->next); 
+} 
+
+ void stampa_entry_tabella_volumi(const TABELLA_VOLUMI * l) {
+  
+
+  flog(LOG_DEBUG, " \nLabel :              %c", l->label); 
+  flog(LOG_DEBUG, " ATA        :             %x", l->ata); 
+  flog(LOG_DEBUG, " DISCO  :             %x", l->disco); 
+  flog(LOG_DEBUG, " TYPE     :             %x", l->type_fs);
+  flog(LOG_DEBUG, " Byte for sector       : %x", l->fat_info.byts_for_sector);
+  flog(LOG_DEBUG, " Sector for cluster  : %x", l->fat_info.sectors_for_cluster);
+  flog(LOG_DEBUG, " Partizione               : %x", l->indice_partizione); 
+  flog(LOG_DEBUG, " First FAT sector     : %x",l->fat_info.first_set_fat); 
+  flog(LOG_DEBUG, " FAT size                  : %x", l->fat_info.size_fat); 
+  flog(LOG_DEBUG, " First Data sector   : %x", l->fat_info.first_set_data);
+  flog(LOG_DEBUG," CLuster                  : %x ",  l->fat_info.first_cluster_directory); 
+  flog(LOG_DEBUG, " DATA size               : %x\n", l->fat_info.size_data); 
+
+}
+
+TABELLA_VOLUMI * get_volume ( byte label) { 
+  
+  TABELLA_VOLUMI * tmp=tabella; 
+
+  if ( label  < 'C' ) 
+    return NULL; 
+
+  while ( tmp )
+    if ( tmp->label == label)  
+      return tmp; 
+    else  
+      tmp=tmp->next; 
+      
+  return NULL; 
+
+} 
+
+
+
+/*INTERFACCIA Taabella volumi*/ 
+
+#ifndef  VOLUMI_H 
+#define  VOLUMI_H 
+
+
+#include <type.h>
+#include <fat.h> 
+
+#define N_ATA    2 
+#define N_DISK  2
+#define SECT_SIZE 512 
+
+typedef struct _TABELLA_VOLUMI_ TABELLA_VOLUMI; 
+typedef struct _INFO_FAT_ INFO_FAT; 
+
+
+
+/*SOLO FAT 32 */
+
+struct _INFO_FAT_ { 
+ 
+  dword first_cluster_directory; 
+
+  dword first_set_data; 
+  dword size_data; 
+  
+  dword first_set_fat; 
+  dword size_fat;
+
+  byte sectors_for_cluster; 
+  word  byts_for_sector; 
+
+}__attribute__((packed));
+
+
+
+
+struct _TABELLA_VOLUMI_ { 
+
+  /* INFORMAZIONI GENARALI VOLUME */
+  byte type_fs;
+  byte ata;
+  byte disco; 
+  byte indice_partizione; 
+  byte label; 
+
+    /* INFORMAZIONI GENARALI FS */
+  INFO_FAT fat_info;    // struttura che contiene info di basso livello del fs
+  dword_ptr  fat;                       // indiirizzo fat caricata in memoria 
+  /*************************************/
+
+  dword_ptr root;     // puntatore al primo cluster della directiri di root 
+
+  TABELLA_VOLUMI * next; 
+
+}__attribute__((packed));
+
+
+// funzione che inizializza la tabella dei volumi 
+TABELLA_VOLUMI * crea_tabella_volumi(); 
+// funzione che riporta un entrata della tabella dei volumi 
+TABELLA_VOLUMI * get_volume ( byte label) ; 
+// funzione di debug 
+void stampa_tabella_volumi( const TABELLA_VOLUMI * list);
+
+ #endif
